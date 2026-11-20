@@ -156,6 +156,36 @@ local function clearCover()
     call(api,'dispatch_custom_event','AC8_TransitionCover','0|0|0|0|0|0|0|1|1')
     S.coverPacket='0|0|0|0|0|0|0|1|1'
 end
+local reviewCameraClass
+local function missionReview(c)
+    if (c.rootName or ''):match('^WBP_.*Debriefing.*_C ') then return true end
+    local name=R.viewTargetName()
+    if name:match('^LiveDebriefingCameraActor ') then return true end
+    if name=='' then return false end
+    if not R.isLiveObject(reviewCameraClass) then
+        reviewCameraClass=call(api,'find_uobject','Class /Script/Live.LiveDebriefingCameraComponent')
+    end
+    local target=call(c.pc,'GetViewTarget')
+    return R.isLiveObject(reviewCameraClass) and
+        R.isLiveObject(call(target,'GetComponentByClass',reviewCameraClass))
+end
+local briefingCameraClass,briefingWidgetClass
+local function missionBriefing(c)
+    if R.viewTargetName():match('^LiveCampaignBriefingCamera ') then return true end
+    local target=call(c.pc,'GetViewTarget')
+    if R.isLiveObject(target) then
+        if not R.isLiveObject(briefingCameraClass) then
+            briefingCameraClass=call(api,'find_uobject','Class /Script/Live.LiveCampaignBriefingCamera')
+        end
+        if R.isLiveObject(briefingCameraClass) and call(target,'is_a',briefingCameraClass)==true then return true end
+    end
+    local root=c.root
+    if not R.isLiveObject(root) then return false end
+    if not R.isLiveObject(briefingWidgetClass) then
+        briefingWidgetClass=call(api,'find_uobject','Class /Script/Live.LiveMenuBriefingWidget')
+    end
+    return R.isLiveObject(briefingWidgetClass) and call(root,'is_a',briefingWidgetClass)==true
+end
 clearCover()
 local function update(_,delta)
     if S.stopped then return end
@@ -166,19 +196,24 @@ local function update(_,delta)
     local rawLoading=hn:find('/Game/Maps/Transition/',1,true)~=nil or
         (c.flight and state=='WaitingToStart')or AC8Runtime.missionLoading.active==true
     local menu=hn:match('^BP_LiveMenuHUD_C ')~=nil
+    local immersive=R.scenePresentation.immersive
+    local immersiveMissionMenu=immersive and menu and (missionBriefing(c) or missionReview(c))
+    R.immersiveMissionMenu=immersiveMissionMenu
     if rawLoading then S.awaitingDestination=true end
     local ci=rawget(_G,'AC8_CinematicIntent')
     local layoutReady=not AC8Runtime.layoutEnabled or
         (AC8Runtime.gameplayCameraReady==true and AC8Runtime.gameplayCameraReadyEpoch==c.epoch)
     local flightReady=c.flight and state=='InProgress'and layoutReady and not AC8Runtime.settingsBusy('presentation','gameplay')
-    local movieReady=ci and (ci.maskActive==true or ci.hangarActive==true)
+    local movieReady=ci and (ci.maskActive==true or ci.hangarUsesCinematicWindow==true or
+        (immersive and (ci.detectedMode=='cinematic' or ci.detectedMode=='hangar')))
     -- A missing optional cinematic module must never keep an invisible owner alive.
     if not ci then movieReady=hn:match('^BP_LiveCinemaHUD_C ')~=nil or hn:match('^BP_LiveHangarHUD_C ')~=nil end
     if not rawLoading and (menu or flightReady or movieReady)then S.awaitingDestination=false end
     S.loading=rawLoading or S.awaitingDestination==true
-    local packet=S.loading and '1|1|0|0|0|0|0|1|1'or menu and '1|0|0|0|0|0|0|1|1'or '0|0|0|0|0|0|0|1|1'
-    S.opacity=(S.loading or menu)and 1 or 0
-    S.source=rawLoading and 'loading-state-cover'or S.awaitingDestination and 'waiting-destination-ready'or menu and 'menu-state-cover'or nil
+    local menuCover=menu and not immersiveMissionMenu
+    local packet=S.loading and '1|1|0|0|0|0|0|1|1'or menuCover and '1|0|0|0|0|0|0|1|1'or '0|0|0|0|0|0|0|1|1'
+    S.opacity=(S.loading or menuCover)and 1 or 0
+    S.source=rawLoading and 'loading-state-cover'or S.awaitingDestination and 'waiting-destination-ready'or menuCover and 'menu-state-cover'or nil
     if packet~=S.coverPacket then
         call(api,'dispatch_custom_event','AC8_TransitionCover',packet)
         S.coverPacket=packet;
@@ -187,7 +222,7 @@ local function update(_,delta)
 end
 uevr.sdk.callbacks.on_pre_engine_tick(update)
 uevr.sdk.callbacks.on_post_engine_tick(function()update(nil,0)end)
-uevr.sdk.callbacks.on_script_reset(function()S.stopped=true;clearCover()end)
+uevr.sdk.callbacks.on_script_reset(function()S.stopped=true;R.immersiveMissionMenu=false;clearCover()end)
 end)(AC8Runtime.host('utility','general_vr_transitions.lua'),AC8Runtime.json,AC8Runtime.log)
 end
 assert(not registry.sections.loading_icon,'Duplicate loading icon')

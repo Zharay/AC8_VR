@@ -65,6 +65,15 @@ local TRUE_S, FALSE_S = "true", "false"
 
 local last_log_t = -999
 
+local function immersiveScene(intent)
+    if not R.scenePresentation.immersive then return false end
+    local hud=R.context.hudName or ''
+    local target=R.viewTargetName()
+    return (intent and intent.detectedMode=='cinematic') or hud:match('^BP_LiveCinemaHUD_C ')
+        or hud:match('^BP_LiveHangarHUD_C ')
+        or target:match('^BP_IGC_CameraPawn_') or target:match('^BP_MGC_CineCamera_C ')
+        or (hud:match('^BP_LiveMenuHUD_C ') and R.immersiveMissionMenu)
+end
 
 
 local function mv_get(k)
@@ -84,7 +93,7 @@ end
 
 local function enter_2d(reason)
     local intent=rawget(_G,'AC8_CinematicIntent')
-    if (intent and intent.hangarActive)or (AC8Runtime.context.hudName or''):match('^BP_LiveHangarHUD_C ')then return end
+    if immersiveScene(intent) or (intent and intent.hangarActive)or (AC8Runtime.context.hudName or''):match('^BP_LiveHangarHUD_C ')then return end
     if S.forced then return end
     local cur = mv_get(KEY)
     if cur == nil then
@@ -190,6 +199,11 @@ local function setup()
 
             local warm = (S.hb_ok == false and S.T > 10)
                       or (S.beats > CFG.WARMUP)
+
+            if immersiveScene(intent) then
+                exit_2d("immersive scene presentation")
+                return
+            end
 
             if CFG.PREVENT and S.frames % CFG.PAWN_EVERY == 0 then
                 local nm = pawn_name()
@@ -421,6 +435,7 @@ local function exit(reason)
     ;
 end
 local function enter(automatic)
+    if R.scenePresentation.immersive then return end
     if AC8Runtime.flightUISize and not AC8Runtime.flightUISize.restore()then return end
     if S.maskActive then return end
     if not S.nativeMaskReady then ;;return end
@@ -451,8 +466,10 @@ local function enter(automatic)
     
 end
 
+local hangarJournal='AC8_VR-HangarRestoreV48.json'
+local scene=R.scenePresentation
 S.hangarSaved={}
-local hk,hj=pcall(function()return json.load_file('AC8_VR-HangarRestoreV48.json')end)
+local hk,hj=pcall(json.load_file,hangarJournal)
 if hk and type(hj)=='table' and type(hj.values)=='table' then
     for _,k in ipairs(cameraKeys)do if type(hj.values[k])=='string' then S.hangarSaved[k]=hj.values[k]end end
 end
@@ -460,37 +477,139 @@ local function recoverOldHangar()
     if next(S.hangarSaved)==nil then return true end
     local restored=true
     for _,k in ipairs(cameraKeys)do if S.hangarSaved[k] and not setUI(k,S.hangarSaved[k])then restored=false end end
-    if restored and pcall(function()json.dump_file('AC8_VR-HangarRestoreV48.json',{values={}},2)end)then S.hangarSaved={} else restored=false end
+    if restored then
+        if S.guardForced then return false end
+        local saved,result=pcall(uevr.params.vr.save_config)
+        if not saved or result==false then
+            scene.message='Normal camera restored in memory, but UEVR could not save it.'
+            return false
+        end
+        local ok,result=pcall(json.dump_file,hangarJournal,{values={}},2)
+        if not ok or result==false then scene.message='Could not clear the hangar camera backup.';return false end
+        S.hangarSaved={}
+    end
     return restored
+end
+local function readHangarCamera()
+    local offsets={}
+    for i,k in ipairs(cameraKeys)do
+        local n=tonumber(mv(k))
+        if not n or not (math.abs(n)<=1e9) then return end
+        offsets[i]=n
+    end
+    return offsets
+end
+local aircraftTreeClass,aircraftTree
+local function treeOnScreen(widget)
+    local call=R.objectCall
+    local owner=call(widget,'GetOwningPlayer')
+    if owner and owner~=R.context.pc then return false end
+    local w=widget
+    for _=1,24 do
+        local visibility=call(w,'GetVisibility')
+        local opacity=call(w,'GetRenderOpacity')
+        if (visibility~=0 and visibility~=3 and visibility~=4) or not (type(opacity)=='number' and opacity>0) then return false end
+        if call(w,'IsInViewport')==true then return true end
+        local parent=call(w,'GetParent')
+        if parent then
+            local selected=call(parent,'GetActiveWidget')
+            if selected and selected~=w then return false end
+        else
+            -- A user widget's inner root has no panel parent.
+            local outer=call(w,'get_outer')
+            if (call(outer,'get_full_name')or''):match('^WidgetTree ') and call(outer,'get_property','RootWidget')==w then
+                parent=call(outer,'get_outer')
+            end
+        end
+        if not parent then return false end
+        w=parent
+    end
+    return false
+end
+local function visibleAircraftTree()
+    if aircraftTree and treeOnScreen(aircraftTree) then return aircraftTree end
+    aircraftTree=nil
+    if not R.isLiveObject(aircraftTreeClass) then
+        aircraftTreeClass=value(uevr.api,'find_uobject','Class /Script/Live.LiveMenuHangarAircraftTreeWidget')
+    end
+    for _,widget in ipairs(R.inventory.objects(aircraftTreeClass,false) or {})do
+        if treeOnScreen(widget) then aircraftTree=widget;return widget end
+    end
+end
+local zeroOffsets={0,0,0}
+local function applyHangarCamera(offsets)
+    local before=readHangarCamera()
+    if not before then return false end
+    for i,k in ipairs(cameraKeys)do
+        if before[i]~=offsets[i] and not setUI(k,offsets[i]) then
+            for j,key in ipairs(cameraKeys)do setUI(key,before[j]) end
+            return false
+        end
+    end
+    return true
+end
+local function hangarWindow(on)
+    if on==(S.hangarUsesCinematicWindow==true) then return end
+    local size,distance=mv('UI_Size'),mv('UI_Distance')
+    if on and (not tonumber(size) or not tonumber(distance)) then return end
+    local ok=pcall(function()
+        uevr.api:dispatch_custom_event('AC8_CinematicLensMode','off')
+        uevr.api:dispatch_custom_event('AC8_CinematicFullView','off')
+        if not on then uevr.api:dispatch_custom_event('AC8_CinematicNearClip','off') end
+        uevr.api:dispatch_custom_event('AC8_CinematicCamera',on and 'on' or 'off')
+        uevr.api:dispatch_custom_event('AC8_HangarCrop',on and ('on|'..size..'|'..distance) or 'off')
+        if on and S.lensRequested and S.nativeProjectionReady then
+            uevr.api:dispatch_custom_event('AC8_CinematicLensMode','on')
+        end
+    end)
+    if ok then
+        S.hangarUsesCinematicWindow=on;S.shotOverridesActive=on;S.cameraLocked=on
+    else
+        scene.message='Could not update hangar framing.'
+    end
 end
 local function hangar(on)
     if on and not S.hangarActive then
         if AC8Runtime.flightUISize and not AC8Runtime.flightUISize.restore()then return end
-        if not recoverOldHangar()then return end
         if S.maskActive then exit('enter-hangar')end
-        if not S.nativeCameraReady or not S.nativeMaskReady or mv('VR_RenderingMethod')~='0'then return end
+        if next(S.saved)~=nil or not recoverOldHangar() then return end
         local saved={};for _,k in ipairs(cameraKeys)do saved[k]=mv(k);if not saved[k]then return end end
-        if not pcall(function()json.dump_file('AC8_VR-HangarRestoreV48.json',{values=saved},2)end)then return end
+        local ok,result=pcall(json.dump_file,hangarJournal,{values=saved},2)
+        if not ok or result==false then scene.message='Could not back up the normal camera.';return end
+        local read,backup=pcall(json.load_file,hangarJournal)
+        for _,k in ipairs(cameraKeys)do
+            if not read or type(backup)~='table' or type(backup.values)~='table' or backup.values[k]~=saved[k] then
+                scene.message='Could not verify the normal camera backup.';return
+            end
+        end
         S.hangarSaved=saved
-        local all=true;for _,k in ipairs(cameraKeys)do if not setUI(k,'0')then all=false end end
-        if not all then recoverOldHangar();return end
-        local size,distance=mv('UI_Size'),mv('UI_Distance')
-        if not tonumber(size)or not tonumber(distance)then recoverOldHangar();return end
-        local ok=pcall(function()
-            uevr.api:dispatch_custom_event('AC8_CinematicFullView','off')
-            uevr.api:dispatch_custom_event('AC8_CinematicCamera','on')
-            uevr.api:dispatch_custom_event('AC8_HangarCrop','on|'..size..'|'..distance)
-            uevr.api:dispatch_custom_event('AC8_CinematicLensMode',S.lensRequested and S.nativeProjectionReady and 'on'or'off')
-        end)
-        if not ok then recoverOldHangar();;return end
-        S.hangarActive=true;S.hangarUsesCinematicWindow=true;S.hangarFullViewMovie=false;S.shotOverridesActive=true;S.cameraLocked=true
-        
-    elseif not on and S.hangarActive then
-        pcall(function()uevr.api:dispatch_custom_event('AC8_HangarCrop','off');uevr.api:dispatch_custom_event('AC8_CinematicFullView','off');uevr.api:dispatch_custom_event('AC8_CinematicCamera','off');uevr.api:dispatch_custom_event('AC8_CinematicLensMode','off')end)
-        S.hangarActive=false;S.hangarUsesCinematicWindow=false;S.shotOverridesActive=false;S.cameraLocked=false
-        local restored=recoverOldHangar();S.persistRestorePending=restored
-        
-    elseif not on and next(S.hangarSaved)~=nil then recoverOldHangar()end
+        S.hangarActive=true
+    end
+    local previousTree=S.aircraftTree
+    local tree=on and visibleAircraftTree() or nil
+    if on then
+        -- Apply once on tree entry so live edits survive until the user saves or leaves.
+        if not tree or tree~=previousTree then
+            local offsets=(tree and scene.hangarCamera) or zeroOffsets
+            if not applyHangarCamera(offsets) then
+                scene.message='Could not apply the hangar camera offsets.'
+                tree=nil
+            end
+        end
+        hangarWindow(not scene.immersive and S.nativeCameraReady==true and S.nativeMaskReady==true and mv('VR_RenderingMethod')=='0')
+    else
+        aircraftTree=nil
+        if S.hangarActive then hangarWindow(false);S.hangarActive=false end
+        recoverOldHangar()
+    end
+    S.aircraftTree=tree
+    if S.saveCameraRequested then
+        local requestedTree=S.saveCameraRequested
+        S.saveCameraRequested=false
+        local offsets=tree and tree==requestedTree and tree==previousTree and readHangarCamera()
+        if offsets then scene.saveHangarCamera(offsets)
+        else scene.message='Open the aircraft tree to save its camera position.' end
+    end
 end
 local function authoredPose()
     local pc=value(uevr.api,'get_player_controller',0)
@@ -516,6 +635,17 @@ local function authoredPose()
     local ok,values=pcall(function()return {location.X,location.Y,location.Z,rotation.Pitch,rotation.Yaw,rotation.Roll}end)
     if not ok then S.authoredPoseState='component-pose-unavailable';return end
     for i=1,6 do if type(values[i])~='number' or values[i]~=values[i] then S.authoredPoseState='invalid-component-pose';return end end
+    local offsets=S.hangarActive and S.hangarOffsets
+    if offsets then
+        -- The native camera lock replaces UEVR's view position, so translate the
+        -- supplied authored pose along the camera's local UE axes in framed mode.
+        local p,y,r=math.rad(values[4]),math.rad(values[5]),math.rad(values[6])
+        local sp,cp,sy,cy,sr,cr=math.sin(p),math.cos(p),math.sin(y),math.cos(y),math.sin(r),math.cos(r)
+        local f,s,u=offsets[1],offsets[2],offsets[3]
+        values[1]=values[1]+f*cp*cy+s*(sr*sp*cy-cr*sy)+u*(-cr*sp*cy-sr*sy)
+        values[2]=values[2]+f*cp*sy+s*(sr*sp*sy+cr*cy)+u*(cy*sr-cr*sp*sy)
+        values[3]=values[3]+f*sp-s*sr*cp+u*cr*cp
+    end
     local parts={};for i=1,6 do parts[i]=string.format('%.17g',values[i])end
     local sent=pcall(function()uevr.api:dispatch_custom_event('AC8_AuthoredCameraPose',table.concat(parts,'|'))end)
     S.authoredPoseState=sent and 'component-pose-sent' or 'component-pose-send-failed';S.authoredPoseComponent=name
@@ -545,7 +675,8 @@ local registered=pcall(function()
         if name=='AC8_CinematicMask_Ready' and not S.nativeMaskReady then S.nativeMaskReady=true; end
         if name=='AC8_CinematicMask_Failed' then
             S.nativeMaskReady=false;S.nativeCameraReady=false
-            hangar(false);exit('native-mask-failed')
+            if S.hangarActive then hangarWindow(false) end
+            exit('native-mask-failed')
         end
     end)
 end)
@@ -553,6 +684,7 @@ S.nativeCallbackRegistered=registered
 local nextProbe=0
 local terminalMode,terminalSince=nil,nil
 uevr.sdk.callbacks.on_pre_engine_tick(function(engine,delta)
+    if scene.immersive and S.maskActive then exit('immersive scene presentation') end
     if not S.maskActive and next(S.saved)~=nil and S.elapsed>=(S.nextRestoreAttempt or 0) then
         restoreUI();S.nextRestoreAttempt=S.elapsed+2
     end
@@ -560,12 +692,12 @@ uevr.sdk.callbacks.on_pre_engine_tick(function(engine,delta)
         if pcall(function() uevr.params.vr.save_config() end) then S.persistRestorePending=false end
     end
     S.elapsed=S.elapsed+math.max(0,math.min(tonumber(delta) or 0.016,1))
-    if S.shotOverridesActive and (S.maskActive or S.hangarActive) then
+    if S.shotOverridesActive and S.maskActive then
         local all=true
         for _,k in ipairs(cameraKeys)do if tonumber(mv(k))~=0 and not setUI(k,'0')then all=false end end
         S.cameraOffsetsHeldZero=all
     else S.cameraOffsetsHeldZero=false end
-    if S.elapsed>=nextProbe then
+    if S.elapsed>=nextProbe or S.saveCameraRequested then
         local ok,row=pcall(camera)
         if ok then
             S.camera=row
@@ -595,6 +727,13 @@ uevr.sdk.callbacks.on_pre_engine_tick(function(engine,delta)
         end
         nextProbe=S.elapsed+0.1
     end
+    S.hangarOffsets=S.hangarUsesCinematicWindow and readHangarCamera() or nil
+end)
+uevr.sdk.callbacks.on_script_reset(function()
+    S.saveCameraRequested=false
+    hangar(false)
+    exit('script reset')
+    if S.persistRestorePending and not S.guardForced then pcall(uevr.params.vr.save_config) end
 end)
 
 ;

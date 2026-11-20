@@ -25,6 +25,12 @@ Adjust UI Size in UEVR and save it for the plane, either with its separate save 
 
 The FPM follows ladder movement/scale and retains native velocity motion. Separate FPM alignment controls provide an additional trim. Mission information and wingman status each have their own scale controls.
 
+## Scene presentation and hangar camera
+
+Open **UEVR → Lua → AC8 VR Scene Presentation** and check **Disable restrictive VR windows** to use the normal headset view for cinematics, the hangar, mission briefing, and mission review. The option is off by default. It leaves actual loading blackouts, game fades, and other menus unchanged. Keep both the Cinematics/Hangar and Loading scripts enabled for all four scenes.
+
+With the aircraft tree open in the hangar, adjust UEVR's forward, right, and up camera offsets, then click **Save current hangar camera** in the same panel. The profile reapplies those offsets each time you open the tree. Other hangar menus use `0, 0, 0`; leaving the hangar restores the previous offsets. This does not change any aircraft preset. The toggle and hangar camera are stored in the profile's `data/AC8_VR-ScenePresentation.json`.
+
 ## First launch and runtime state
 
 The editable `HUD_PRESENTATION` block in HUD Layout supplies initial distance 1m, size 1 and curvature 113.625 degrees. The generated `AC8_VR-HUDPresentationSetup.json` marker admits this once; later saved UEVR changes are respected. It must be absent from a fresh-install archive and retained for an existing user's profile.

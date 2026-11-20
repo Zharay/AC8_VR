@@ -659,6 +659,76 @@ end
 
 
 -- End Core pause and tutorial features.
+local function scenePresentation(R)
+ local file='AC8_VR-ScenePresentation.json'
+ local S={immersive=false}
+ R.scenePresentation=S
+ local ok,saved=pcall(json.load_file,file)
+ if ok and type(saved)=='table' and saved.version==1 then
+  S.immersive=saved.immersive==true
+  local v=saved.hangarCamera
+  if type(v)=='table' and #v==3 then
+   local valid=true
+   for i=1,3 do if type(v[i])~='number' or not (math.abs(v[i])<=1e9) then valid=false end end
+   if valid then S.hangarCamera=v else S.message='Invalid saved hangar camera.' end
+  end
+ end
+ local function save(immersive,camera)
+  local written,result=pcall(json.dump_file,file,{version=1,immersive=immersive,hangarCamera=camera},2)
+  local read,actual=pcall(json.load_file,file)
+  local matches=read and type(actual)=='table' and actual.version==1 and actual.immersive==immersive
+  if matches and camera then
+   local v=actual.hangarCamera
+   matches=type(v)=='table' and v[1]==camera[1] and v[2]==camera[2] and v[3]==camera[3]
+  elseif matches then matches=actual.hangarCamera==nil end
+  if not written or result==false or not matches then
+   S.message='Could not save scene presentation settings.'
+   return false
+  end
+  S.immersive,S.hangarCamera,S.message=immersive,camera,nil
+  return true
+ end
+ R.host('presentation','scene presentation preferences').sdk.callbacks.on_pre_engine_tick(function()
+  local requested=S.requestedMode
+  if requested==nil then return end
+  S.requestedMode=nil
+  save(requested,S.hangarCamera)
+ end)
+ function S.saveHangarCamera(camera)
+  if save(S.immersive,camera) then S.message='Hangar camera saved.' end
+ end
+end
+
+local function registerScenePanel(R)
+ if not registry.started.cinematic and not registry.started.transitions then return end
+ local S=R.scenePresentation
+ local function draw()
+  local changed,value=imgui.checkbox('Disable restrictive VR windows',S.immersive)
+  if changed then S.requestedMode=value end
+  imgui.text('Applies to cinematics, the hangar, mission briefing, and mission review.')
+  local hangar=rawget(_G,'AC8_CinematicIntent')
+  if hangar then
+   if hangar.aircraftTree then
+    imgui.text('Move the camera using UEVR camera offsets, then save it here.')
+    if imgui.button('Save current hangar camera') then hangar.saveCameraRequested=hangar.aircraftTree end
+   else
+    imgui.text('Open the aircraft tree in the hangar to adjust and save its camera.')
+   end
+   local v=S.hangarCamera
+   if v then imgui.text(string.format('Saved hangar offsets (forward / right / up): %.2f / %.2f / %.2f',v[1],v[2],v[3])) end
+  end
+  if S.message then imgui.text(S.message) end
+ end
+ local title='AC8 VR Scene Presentation'
+ if uevr.lua and uevr.lua.add_script_panel then
+  uevr.lua.add_script_panel(title,draw)
+ else
+  uevr.sdk.callbacks.on_draw_ui(function()
+   if imgui and imgui.tree_node(title) then draw();imgui.tree_pop() end
+  end)
+ end
+end
+
 local required={'core','cutscene_guard','inherited_hud','mission_loading','glow_lifecycle','target_presentation','target_labels','target_animation','target_pins','target_materials','hud_policy','glow_brightness','tutorial_fill','pause_attachment','transitions','aircraft_presets','plane_camera','cinematic','cinematic_ownership','hud_layout','loading_icon','gameplay_camera'}
 registry.required=required;registry.started={};registry.status={};registry.dependencies={}
 local function initialize(key)
@@ -671,6 +741,7 @@ function registry.start(finalize)
  if not registry.started.core then initialize('core')end
  if not finalize then return end
  registry.state='starting'
+ scenePresentation(AC8Runtime)
  if not registry.sections.cinematic then
   local keys={UI_OverlayType=true,UI_Distance=true,UI_Size=true,UI_FollowView=true,UI_Y_Offset=true,UI_X_Offset=true,UI_Cylinder_Angle=true,VR_CameraForwardOffset=true,VR_CameraRightOffset=true,VR_CameraUpOffset=true}
   AC8Runtime.recoverSettings('AC8_VR-CinematicUIRestore.json',keys)
@@ -690,6 +761,7 @@ function registry.start(finalize)
   end
  end
  registry.state='ready'
+ registerScenePanel(AC8Runtime)
  
 end
 registry.start()
