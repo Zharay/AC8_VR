@@ -1,5 +1,16 @@
 # Changelog
 
+## AC8-VR_Zharay_v0.3.5
+- Fix for UI and cutscene z-fighting (flicker) by moving the masked OpenXR layer forward by 20mm. Affects hangar menus (aircraft tree/selection), mission briefings, subtitles, and cutscenes (2D and 3D)
+- Added immersive scene presentation settings and camera management. Disables the restrictive cinematic masking on cutscenes and menus while providing savable camera positions for hangar menus.
+- Resized masks to compensate for the change in UI size
+- Moved UEVR settings out of `Script UI` and into `AC8 VR Setup`
+- Cleaned up AI wordiness, renamed certain settings, and added tooltips to better explain what they do.
+- Moved "Flight UI Canvas Size" and "Cockpit size" out of aircraft presets and put them into HUD layout
+- Moved legacy Ladder UI into its own collapsible section and to the bottom of the menu
+- Re-arranged per aircraft HUD menus below the default menus that contain save buttons
+- Added a checkbox to to hide global/for all plane save buttons depending on current settings
+
 ## AC8-VR_MankTank_v0.3.4
 
 - Fix the remaining in-mission freeze where the picture stopped while audio continued. A memory dump showed the game thread (HUD glow discovery) and the render thread (another UEVR plugin delivering a Lua event, here CheekyFoveatedDLSS) waiting on each other's UEVR Lua locks. The v0.3.3 change addressed a different wait and did not cover this.
