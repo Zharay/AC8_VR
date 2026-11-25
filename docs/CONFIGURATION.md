@@ -27,9 +27,9 @@ The FPM follows ladder movement/scale and retains native velocity motion. Separa
 
 ## Scene presentation and hangar camera
 
-Open **UEVR → Lua → AC8 VR Scene Presentation** and check **Disable restrictive VR windows** to use the normal headset view for cinematics, the hangar, mission briefing, and mission review. The option is off by default. It leaves actual loading blackouts, game fades, and other menus unchanged. Keep both the Cinematics/Hangar and Loading scripts enabled for all four scenes.
+Open **UEVR → Lua → AC8 VR Scene Presentation** and check **Toggle Immersive Mode** to use the normal headset view for cinematics, the hangar, mission briefing, and mission review. The option is off by default. It leaves actual loading blackouts, game fades, and other menus unchanged. Keep both the Cinematics/Hangar and Loading scripts enabled for all four scenes.
 
-With the aircraft tree open in the hangar, adjust UEVR's forward, right, and up camera offsets, then click **Save current hangar camera** in the same panel. The profile reapplies those offsets each time you open the tree. Other hangar menus use `0, 0, 0`; leaving the hangar restores the previous offsets. This does not change any aircraft preset. The toggle and hangar camera are stored in the profile's `data/AC8_VR-ScenePresentation.json`.
+With the hangar main menu or aircraft tree open, adjust UEVR's forward, right, and up camera offsets. **Save global hangar camera** saves the fallback for that menu. **Save camera for current map** saves a separate position for the current map and menu; **Delete camera for current map** removes it and reapplies the global fallback. Map-specific controls appear when the current world is identified; different streamed scenery in the same world may share a position. If no map-specific position exists, the global position is used; an unsaved global position defaults to `0, 0, 0`. Other hangar menus use `0, 0, 0`; leaving the hangar restores the previous offsets. This does not change any aircraft preset. The toggle and hangar cameras are stored in the profile's `data/AC8_VR-ScenePresentation.json`; existing global saves are retained.
 
 ## First launch and runtime state
 

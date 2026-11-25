@@ -661,41 +661,91 @@ end
 -- End Core pause and tutorial features.
 local function scenePresentation(R)
  local file='AC8_VR-ScenePresentation.json'
- local S={immersive=false}
+ local S={immersive=false,hangarMapCameras={}}
  R.scenePresentation=S
+ local function validCamera(v)
+  if type(v)~='table' or #v~=3 then return false end
+  for i=1,3 do if type(v[i])~='number' or not (math.abs(v[i])<=1e9) then return false end end
+  return true
+ end
  local ok,saved=pcall(json.load_file,file)
  if ok and type(saved)=='table' and saved.version==1 then
   S.immersive=saved.immersive==true
-  local v=saved.hangarCamera
-  if type(v)=='table' and #v==3 then
-   local valid=true
-   for i=1,3 do if type(v[i])~='number' or not (math.abs(v[i])<=1e9) then valid=false end end
-   if valid then S.hangarCamera=v else S.message='Invalid saved hangar camera.' end
+  for _,key in ipairs({'hangarCamera','hangarTopCamera'}) do
+   local v=saved[key]
+   if v~=nil then
+    if validCamera(v) then S[key]=v else S.message='Invalid saved hangar camera.' end
+   end
+  end
+  if saved.hangarMapCameras~=nil then
+   local maps=saved.hangarMapCameras
+   local valid=type(maps)=='table'
+   if valid then
+    for map,entries in pairs(maps) do
+     if type(map)~='string' or map=='' or type(entries)~='table' then valid=false;break end
+     for menu,camera in pairs(entries) do
+      if (menu~='tree' and menu~='top') or not validCamera(camera) then valid=false;break end
+     end
+     if not valid or next(entries)==nil then valid=false;break end
+    end
+   end
+   if valid then S.hangarMapCameras=maps
+   else S.invalidHangarMapCameras=true;S.message='Invalid map-specific hangar cameras; settings cannot be saved.' end
   end
  end
- local function save(immersive,camera)
-  local written,result=pcall(json.dump_file,file,{version=1,immersive=immersive,hangarCamera=camera},2)
+ local function sameCamera(a,b)
+  if b==nil then return a==nil end
+  return validCamera(a) and a[1]==b[1] and a[2]==b[2] and a[3]==b[3]
+ end
+ local function sameMaps(actual,expected)
+  if next(expected)==nil then return actual==nil or (type(actual)=='table' and next(actual)==nil) end
+  if type(actual)~='table' then return false end
+  for map,entries in pairs(expected) do
+   local v=actual[map]
+   if type(v)~='table' or not sameCamera(v.tree,entries.tree) or not sameCamera(v.top,entries.top) then return false end
+   for menu in pairs(v) do if menu~='tree' and menu~='top' then return false end end
+  end
+  for map in pairs(actual) do if expected[map]==nil then return false end end
+  return true
+ end
+ local function save(immersive,camera,topCamera,maps)
+  if S.invalidHangarMapCameras then
+   S.message='Invalid map-specific hangar cameras; settings cannot be saved.'
+   return false
+  end
+  local storedMaps=next(maps) and maps or nil
+  local written,result=pcall(json.dump_file,file,{version=1,immersive=immersive,hangarCamera=camera,hangarTopCamera=topCamera,hangarMapCameras=storedMaps},2)
   local read,actual=pcall(json.load_file,file)
-  local matches=read and type(actual)=='table' and actual.version==1 and actual.immersive==immersive
-  if matches and camera then
-   local v=actual.hangarCamera
-   matches=type(v)=='table' and v[1]==camera[1] and v[2]==camera[2] and v[3]==camera[3]
-  elseif matches then matches=actual.hangarCamera==nil end
+  local matches=read and type(actual)=='table' and actual.version==1 and actual.immersive==immersive and
+   sameCamera(actual.hangarCamera,camera) and sameCamera(actual.hangarTopCamera,topCamera) and sameMaps(actual.hangarMapCameras,maps)
   if not written or result==false or not matches then
    S.message='Could not save scene presentation settings.'
    return false
   end
-  S.immersive,S.hangarCamera,S.message=immersive,camera,nil
+  S.immersive,S.hangarCamera,S.hangarTopCamera,S.hangarMapCameras,S.message=immersive,camera,topCamera,maps,nil
   return true
  end
  R.host('presentation','scene presentation preferences').sdk.callbacks.on_pre_engine_tick(function()
   local requested=S.requestedMode
   if requested==nil then return end
   S.requestedMode=nil
-  save(requested,S.hangarCamera)
+  save(requested,S.hangarCamera,S.hangarTopCamera,S.hangarMapCameras)
  end)
- function S.saveHangarCamera(camera)
-  if save(S.immersive,camera) then S.message='Hangar camera saved.' end
+ function S.saveHangarCamera(menu,camera)
+  local tree=menu=='tree' and camera or S.hangarCamera
+  local top=menu=='top' and camera or S.hangarTopCamera
+  if save(S.immersive,tree,top,S.hangarMapCameras) then S.message='Global hangar camera saved.' end
+ end
+ function S.setMapHangarCamera(menu,map,camera)
+  local maps={}
+  for key,entries in pairs(S.hangarMapCameras) do maps[key]={tree=entries.tree,top=entries.top} end
+  local entries=maps[map] or {}
+  entries[menu]=camera
+  maps[map]=next(entries) and entries or nil
+  if save(S.immersive,S.hangarCamera,S.hangarTopCamera,maps) then
+   S.message=camera and 'Map-specific hangar camera saved.' or 'Map-specific hangar camera deleted.'
+   return true
+  end
  end
 end
 
@@ -703,19 +753,37 @@ local function registerScenePanel(R)
  if not registry.started.cinematic and not registry.started.transitions then return end
  local S=R.scenePresentation
  local function draw()
-  local changed,value=imgui.checkbox('Disable restrictive VR windows',S.immersive)
+  local changed,value=imgui.checkbox('Toggle Immersive Mode',S.immersive)
   if changed then S.requestedMode=value end
-  imgui.text('Applies to cinematics, the hangar, mission briefing, and mission review.')
+  imgui.text('Disables restrictive VR windows and applies to cinematics, the hangar, mission briefing, and mission review.')
   local hangar=rawget(_G,'AC8_CinematicIntent')
   if hangar then
-   if hangar.aircraftTree then
+   if hangar.hangarMenu and hangar.hangarMenuWidget then
     imgui.text('Move the camera using UEVR camera offsets, then save it here.')
-    if imgui.button('Save current hangar camera') then hangar.saveCameraRequested=hangar.aircraftTree end
+    imgui.text(hangar.hangarMenu=='tree' and 'Current menu: aircraft tree' or 'Current menu: hangar main menu')
+    if imgui.button('Save global hangar camera') then
+     hangar.saveCameraRequested={action='global',menu=hangar.hangarMenu,widget=hangar.hangarMenuWidget,map=hangar.hangarMap}
+    end
+    if hangar.hangarMap then
+     imgui.text('Current map: '..hangar.hangarMap)
+     local entries=S.hangarMapCameras[hangar.hangarMap]
+     imgui.text(entries and entries[hangar.hangarMenu] and 'Map-specific camera saved.' or 'Using global camera fallback.')
+     if imgui.button('Save camera for current map') then
+      hangar.saveCameraRequested={action='map',menu=hangar.hangarMenu,widget=hangar.hangarMenuWidget,map=hangar.hangarMap}
+     end
+     if imgui.button('Delete camera for current map') then
+      hangar.saveCameraRequested={action='delete',menu=hangar.hangarMenu,widget=hangar.hangarMenuWidget,map=hangar.hangarMap}
+     end
+    else
+     imgui.text('Current map unavailable; using the global camera.')
+    end
    else
-    imgui.text('Open the aircraft tree in the hangar to adjust and save its camera.')
+    imgui.text('Open the hangar main menu or aircraft tree to adjust and save its camera.')
    end
    local v=S.hangarCamera
-   if v then imgui.text(string.format('Saved hangar offsets (forward / right / up): %.2f / %.2f / %.2f',v[1],v[2],v[3])) end
+   if v then imgui.text(string.format('Aircraft tree offsets (forward / right / up): %.2f / %.2f / %.2f',v[1],v[2],v[3])) end
+   v=S.hangarTopCamera
+   if v then imgui.text(string.format('Hangar main menu offsets (forward / right / up): %.2f / %.2f / %.2f',v[1],v[2],v[3])) end
   end
   if S.message then imgui.text(S.message) end
  end

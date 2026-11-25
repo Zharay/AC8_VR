@@ -499,8 +499,11 @@ local function readHangarCamera()
     end
     return offsets
 end
-local aircraftTreeClass,aircraftTree
-local function treeOnScreen(widget)
+local hangarWidgets={
+    tree={classPath='Class /Script/Live.LiveMenuHangarAircraftTreeWidget'},
+    top={classPath='Class /Script/Live.LiveMenuHangarTopWidget'},
+}
+local function widgetOnScreen(widget)
     local call=R.objectCall
     local owner=call(widget,'GetOwningPlayer')
     if owner and owner~=R.context.pc then return false end
@@ -526,14 +529,32 @@ local function treeOnScreen(widget)
     end
     return false
 end
-local function visibleAircraftTree()
-    if aircraftTree and treeOnScreen(aircraftTree) then return aircraftTree end
-    aircraftTree=nil
-    if not R.isLiveObject(aircraftTreeClass) then
-        aircraftTreeClass=value(uevr.api,'find_uobject','Class /Script/Live.LiveMenuHangarAircraftTreeWidget')
+local function visibleHangarWidget(entry)
+    if entry.widget and widgetOnScreen(entry.widget) then return entry.widget end
+    entry.widget=nil
+    if not R.isLiveObject(entry.class) then
+        entry.class=value(uevr.api,'find_uobject',entry.classPath)
     end
-    for _,widget in ipairs(R.inventory.objects(aircraftTreeClass,false) or {})do
-        if treeOnScreen(widget) then aircraftTree=widget;return widget end
+    for _,widget in ipairs(R.inventory.objects(entry.class,false) or {})do
+        if widgetOnScreen(widget) then entry.widget=widget;return widget end
+    end
+end
+local function currentHangarMap()
+    local pc=R.context.pc
+    local controller=R.objectCall(pc,'get_full_name')
+    local pm=R.objectCall(pc,'get_property','PlayerCameraManager')
+    local target=R.objectCall(pc,'GetViewTarget') or R.objectCall(pm,'GetViewTarget')
+    local targetName=R.objectCall(target,'get_full_name')
+    if type(targetName)~='string' or not targetName:match('^BP_HangarCamera_C ') then return end
+    local level=type(controller)=='string' and controller:match('^%S+ ([^%s]+[%.:]PersistentLevel)%.')
+    if level then return level end
+    local name=R.objectCall(R.gameStatics(),'GetCurrentLevelName',pc,true)
+    if name~=nil and type(name)~='string' then
+        local ok,text=pcall(function()return name:to_string()end)
+        name=ok and text or nil
+    end
+    if type(name)=='string' and name~='' and name~='None' and not name:find('[%s%c]') then
+        return 'world:'..name
     end
 end
 local zeroOffsets={0,0,0}
@@ -585,30 +606,59 @@ local function hangar(on)
         S.hangarSaved=saved
         S.hangarActive=true
     end
-    local previousTree=S.aircraftTree
-    local tree=on and visibleAircraftTree() or nil
+    local previousMenu,previousWidget,previousMap=S.hangarMenu,S.hangarMenuWidget,S.hangarMap
+    local map=on and currentHangarMap() or nil
+    local menu,widget
     if on then
-        -- Apply once on tree entry so live edits survive until the user saves or leaves.
-        if not tree or tree~=previousTree then
-            local offsets=(tree and scene.hangarCamera) or zeroOffsets
+        widget=visibleHangarWidget(hangarWidgets.tree)
+        if widget then menu='tree'
+        else
+            widget=visibleHangarWidget(hangarWidgets.top)
+            if widget then menu='top' end
+        end
+    end
+    if on then
+        -- Apply once on menu entry so live edits survive until the user saves or leaves.
+        if not widget or widget~=previousWidget or menu~=previousMenu or map~=previousMap then
+            local entries=map and scene.hangarMapCameras[map]
+            local offsets=(entries and entries[menu]) or (menu=='tree' and scene.hangarCamera) or (menu=='top' and scene.hangarTopCamera) or zeroOffsets
             if not applyHangarCamera(offsets) then
                 scene.message='Could not apply the hangar camera offsets.'
-                tree=nil
+                menu,widget=nil,nil
             end
         end
         hangarWindow(not scene.immersive and S.nativeCameraReady==true and S.nativeMaskReady==true and mv('VR_RenderingMethod')=='0')
     else
-        aircraftTree=nil
+        for _,entry in pairs(hangarWidgets)do entry.widget=nil end
         if S.hangarActive then hangarWindow(false);S.hangarActive=false end
         recoverOldHangar()
     end
-    S.aircraftTree=tree
+    S.hangarMenu,S.hangarMenuWidget,S.hangarMap=menu,widget,map
     if S.saveCameraRequested then
-        local requestedTree=S.saveCameraRequested
+        local requested=S.saveCameraRequested
         S.saveCameraRequested=false
-        local offsets=tree and tree==requestedTree and tree==previousTree and readHangarCamera()
-        if offsets then scene.saveHangarCamera(offsets)
-        else scene.message='Open the aircraft tree to save its camera position.' end
+        if widget and widget==requested.widget and widget==previousWidget and
+            menu==requested.menu and menu==previousMenu and map==requested.map and map==previousMap then
+            if requested.action=='delete' and map then
+                local entries=scene.hangarMapCameras[map]
+                if not entries or not entries[menu] then
+                    scene.message='No map-specific camera exists for this menu.'
+                elseif scene.setMapHangarCamera(menu,map,nil) then
+                    local fallback=(menu=='tree' and scene.hangarCamera) or (menu=='top' and scene.hangarTopCamera) or zeroOffsets
+                    if not applyHangarCamera(fallback) then
+                        scene.message='Camera deleted, but the global fallback could not be applied.'
+                        S.hangarMenuWidget=nil
+                    end
+                end
+            elseif requested.action=='global' or (requested.action=='map' and map) then
+                local offsets=readHangarCamera()
+                if not offsets then scene.message='Could not read the hangar camera offsets.'
+                elseif requested.action=='global' then scene.saveHangarCamera(menu,offsets)
+                else scene.setMapHangarCamera(menu,map,offsets) end
+            else scene.message='Current hangar map is unavailable.' end
+        else
+            scene.message='Hangar menu or map changed; try the camera action again.'
+        end
     end
 end
 local function authoredPose()

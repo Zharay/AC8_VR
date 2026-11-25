@@ -1,0 +1,23 @@
+{
+  "hangarCamera": [
+    0.0,
+    0.0,
+    250.0
+  ],
+  "hangarMapCameras": {
+    "/Game/Maps/Hangar/PL_Hangar001.PL_Hangar001.PersistentLevel": {
+      "top": [
+        0.0,
+        0.0,
+        1250.0
+      ]
+    }
+  },
+  "hangarTopCamera": [
+    0.0,
+    0.0,
+    250.0
+  ],
+  "immersive": false,
+  "version": 1
+}
