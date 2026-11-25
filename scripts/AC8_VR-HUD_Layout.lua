@@ -1224,7 +1224,7 @@ end
 local RESCAN_EVERY = 1800
 
 local CFG_FILE = "AC8_VR-Ladder.json"
-local dirty, save_msg = false, ""
+local dirty, saveStatus = false, {}
 
 local function readField(o,k)return o[k]end
 local function call(obj, fn, ...)
@@ -1682,6 +1682,7 @@ end
 local function ui_body()
     if workshop_active and workshop_ui then workshop_ui(); return end
     if drawHUDProfiles then drawHUDProfiles()end
+    if imgui.collapsing_header and not imgui.collapsing_header("LEGACY: HUD tuning")then return end
     imgui.text("AC8 HUD tune   " .. SCRIPT_VERSION)
 
     for _, t in ipairs(TARGETS) do
@@ -1745,7 +1746,7 @@ local function ui_body()
     local okb, saved = pcall(function() return imgui.button("Save") end)
     if okb and saved then
         local ok, msg = save_cfg()
-        save_msg = (ok and "[OK] " or "[FAIL] ") .. msg
+        AC8Runtime.setSaveMessage(saveStatus,(ok and "[OK] " or "[FAIL] ") .. msg)
         if ok then dirty = false end
         
     end
@@ -1761,7 +1762,7 @@ local function ui_body()
             end
         end
         local ok = save_cfg()
-        save_msg = ok and "[RESET] all back to base" or "[RESET] save FAILED"
+        AC8Runtime.setSaveMessage(saveStatus,ok and "[RESET] all back to base" or "[RESET] save FAILED")
         if ok then dirty = false end
         
     end
@@ -1779,19 +1780,10 @@ local function ui_body()
     end
 
     imgui.text(dirty and "UNSAVED CHANGES" or "saved")
-    if save_msg ~= "" then imgui.text(save_msg) end
+    AC8Runtime.drawSaveMessage(saveStatus)
 end
 
-local ui_err_logged = false
-local function ui_safe()
-    local ok, err = pcall(ui_body)
-    if not ok and not ui_err_logged then
-        ui_err_logged = true
-        
-    end
-end
-
-local ui_ok = pcall(function() uevr.sdk.callbacks.on_draw_ui(ui_safe) end)
+AC8Runtime.setupHUD = ui_body
 
 
 
@@ -1825,7 +1817,7 @@ local function ws_params(p)
         and type(p.y)=="number" and p.y>=-4000 and p.y<=4000
         and type(p.scale)=="number" and p.scale>=0.1 and p.scale<=3
 end
--- Script UI edits the same in-memory workshop settings as the game-thread
+-- The setup UI edits the same in-memory workshop settings as the game-thread
 -- layout callback. No UObject reads/writes or extra scheduling in this UI.
 local function ws_same_preferences(a,b)
     if type(a)~=type(b)then return false end
@@ -1862,8 +1854,8 @@ local function updateHUDProfiles()
         local action=hudProfiles.pending;hudProfiles.pending=nil
         if action then
             if action.kind=='reset'then hudProfiles.force=true
-            elseif action.kind=='hudGlobal'then local ok,msg=hudProfiles:saveGlobalHUD(action.layout);hudProfiles.message=msg;if ok then ws_ui_dirty=false end
-            elseif action.kind=='all'then local ok,msg=hudProfiles:saveAll(action.layout);hudProfiles.message=msg;if ok then ws_ui_dirty=false end end
+            elseif action.kind=='hudGlobal'then local ok,msg=hudProfiles:saveGlobalHUD(action.layout);AC8Runtime.setSaveMessage(hudProfiles,msg);if ok then ws_ui_dirty=false end
+            elseif action.kind=='all'then local ok,msg=hudProfiles:saveAll(action.layout);AC8Runtime.setSaveMessage(hudProfiles,msg);if ok then ws_ui_dirty=false end end
         end
     end
     local mode=hudProfiles.db.useDefaultForAllPlanes and'all'or'plane'
@@ -1882,12 +1874,13 @@ local function uiSection(label)
 end
 drawHUDProfiles=function()
     if AC8Runtime.aircraftPresets then return end
-    uiSection('Shared HUD layout')
+    uiSection('Save Settings')
     imgui.text('AC8_VR-AircraftPresets.lua is absent. General HUD controls remain available.')
     if imgui.button('Save current HUD as global default')then queueProfileAction('hudGlobal')end
     if imgui.button('Save HUD layout for ALL planes')then queueProfileAction('all')end
     if imgui.button('Reset HUD to saved layout')then queueProfileAction('reset')end
     if hudProfiles.message then imgui.text(hudProfiles.message)end
+    AC8Runtime.drawSaveMessage(hudProfiles)
 end
 AC8Runtime.hudLayoutControls={snapshot=function()return hudProfiles.copy(profileSnapshot())end,saved=function()ws_ui_dirty=false;ws_ui_message=''end,changed=function()ws_ui_dirty=true end}
 
@@ -1908,7 +1901,7 @@ workshop_ui=function()
     simpleHUD.values=WS.simple
     uiSection('Modify position of Grouped HUD Elements')
     imgui.text('Save/reload works for newly saved layouts.')
-    imgui.text('Move complete groups. Negative X moves left; negative Y moves up.')
+    imgui.text('Negative X moves left; negative Y moves up.')
     local function controls(label,p,positionOnly,resetKeys)
         local function editedControl()
             if p.enabled~=nil then p.enabled=true end
@@ -1955,7 +1948,7 @@ workshop_ui=function()
         if imgui.unindent then imgui.unindent()end
     end
     if header('4. Center Ladder')and WS.groups.ladder then
-        imgui.text('Pitch, speed, altitude and FPM move/scale together. Native FPM flight motion is retained.')
+        imgui.text('Pitch, speed, altitude and FPM move/scale together.')
         controls('Center ladder',WS.groups.ladder)
         if imgui.indent then imgui.indent()end
         if header('Flight Path Marker alignment')then
@@ -1991,6 +1984,43 @@ workshop_ui=function()
         if imgui.same_line then imgui.same_line()end
         if imgui.button('Bomb height +1')then w.bombY=math.min(4000,w.bombY+1);ws_ui_dirty=true end
         if imgui.button('Reset bomb calibration')then w.bombFov=12.5;w.bombY=0;ws_ui_dirty=true end
+    end
+    local uiSize=AC8Runtime.flightUISize
+    local plane=profilePlane()
+    local showRelevant=AC8Runtime.showOnlyRelevantSettings~=false
+    local perPlaneEnabled=AC8Runtime.perPlaneSettingsEnabled~=false
+    if uiSize and plane and(not showRelevant or perPlaneEnabled)and header('Flight UI Canvas Size')then
+        local current=uiSize.read()
+        imgui.text('Current UI Size: '..(current and string.format('%.3g',current)or'unavailable'))
+        imgui.text('Normal UI Size: '..(uiSize.db and string.format('%.3g',uiSize.db.defaultSize)or'waiting'))
+        local queueUIAction=AC8Runtime.queueFlightUISizeAction
+        if queueUIAction then
+            if imgui.button('Save UI Size for current plane')then queueUIAction('uiSize')end
+            if imgui.button('Use normal UI Size for current plane')then queueUIAction('uiSizeDefault')end
+        else
+            imgui.text('Aircraft-specific UI Size controls are unavailable.')
+        end
+        imgui.text('')
+        imgui.text('Adjust UI Size in the UEVR Menu; HUD saves for this plane include it too.')
+        imgui.text('Pause/retry keep the flight size; other modes use normal size.')
+        if uiSize.message then imgui.text(uiSize.message)end
+        AC8Runtime.drawSaveMessage(uiSize)
+    end
+    local camera=AC8Runtime.planeSpecificOffset
+    if camera and camera.getCockpitSize and plane and perPlaneEnabled and header('Cockpit size (cockpit view only)') then
+        local enabled,size=camera.getCockpitSize(plane)
+        local changed,value=imgui.checkbox('Customize cockpit size for this plane',enabled)
+        if changed then enabled=value;camera.setCockpitSize(plane,enabled,size)end
+        if enabled then
+            local edited,nextSize=imgui.slider_float('Cockpit size multiplier',size,.5,2)
+            if edited then size=nextSize;camera.setCockpitSize(plane,true,size)end
+            if imgui.button('Cockpit size -0.01')then camera.setCockpitSize(plane,true,math.max(.5,size-.01))end
+            if imgui.same_line then imgui.same_line()end
+            if imgui.button('Cockpit size +0.01')then camera.setCockpitSize(plane,true,math.min(2,size+.01))end
+            if imgui.button('Reset cockpit size to 1.0x')then camera.setCockpitSize(plane,true,1)end
+        end
+        imgui.text('Higher = larger pilot/cockpit/world.')
+        if camera.cockpitSize and camera.cockpitSize.message then imgui.text(camera.cockpitSize.message)end
     end
     if edited then
         ws_ui_sync();ws_ui_message=''

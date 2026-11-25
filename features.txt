@@ -1,10 +1,10 @@
-AC8-VR_MankTank_v0.3.3 features
+AC8-VR_MankTank_v0.3.4 features
 
 Cockpit HUD layout
 - Resolution independence - layouts should still work and hud elements
   should stay in place regardless of your current resolution.
 - Move and resize the radar, center ladder, aircraft status, mission
-  information and wingman status live from UEVR's Script UI.
+  information and wingman status live from UEVR's AC8 VR Setup panel.
 - Move score, current target and time remaining together as Mission
   Information, then fine-tune each row separately.
 - Move wingman orders, the comms portrait and radio messages independently.
@@ -49,7 +49,7 @@ Targets and weapon displays
 - Resize supported target-lock seeker artwork. Adjust the SAAM circle size
   from the HUD controls.
 - Align the bomb trajectory display with the flight path marker. Fine-tune
-  the bomb projection and landing marker height in Script UI while the
+  the bomb projection and landing marker height in AC8 VR Setup while the
   game continues to calculate the actual impact point.
 
 Cinematics, hangar and transitions

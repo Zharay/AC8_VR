@@ -353,6 +353,15 @@ local R={version=105,tick=0,domains={},connected={},context={epoch=0},cache={},e
 _G.AC8Runtime=R
 R.ensureTutorialState=function()return ensureTutorialState(R)end
 R.newHUDDefaultsStore=newHUDDefaultsStore
+function R.setSaveMessage(state,text)
+ state.saveMessage=text;state.saveMessageExpiresAt=os.time()+15
+end
+function R.drawSaveMessage(state)
+ if state.saveMessageExpiresAt and os.time()>=state.saveMessageExpiresAt then
+  state.saveMessage='';state.saveMessageExpiresAt=nil
+ end
+ if state.saveMessage and state.saveMessage~=''then imgui.text(state.saveMessage)end
+end
 local order={'presentation','admission','layout','camera','utility','loading','intro','development'}
 local function invokeMethod(o,k,...)return o[k](o,...)end
 local function invoke(o,k,...)local ok,v=pcall(invokeMethod,o,k,...);if ok then return v end end
@@ -657,8 +666,28 @@ end
 
 end
 
-
 -- End Core pause and tutorial features.
+local function registerSetupPanel(R)
+ if not R.setupHUD and not R.setupAircraft then return end
+ local function draw()
+  for _,entry in ipairs({{'Aircraft presets',R.setupAircraft},{'HUD layout',R.setupHUD}})do
+   if entry[2] then
+    local ok,err=pcall(entry[2])
+    R.errors['AC8 VR Setup: '..entry[1]]=ok and nil or tostring(err)
+    if not ok then imgui.text('AC8 VR Setup - '..entry[1]..' error: '..tostring(err))end
+   end
+  end
+ end
+ if uevr.lua and uevr.lua.add_script_panel then
+  uevr.lua.add_script_panel('AC8 VR Setup',draw)
+ else
+  uevr.sdk.callbacks.on_draw_ui(function()
+   imgui.text('AC8 VR Setup (custom panels unavailable in this UEVR build)')
+   draw()
+  end)
+ end
+end
+
 local required={'core','cutscene_guard','inherited_hud','mission_loading','glow_lifecycle','target_presentation','target_labels','target_animation','target_pins','target_materials','hud_policy','glow_brightness','tutorial_fill','pause_attachment','transitions','aircraft_presets','plane_camera','cinematic','cinematic_ownership','hud_layout','loading_icon','gameplay_camera'}
 registry.required=required;registry.started={};registry.status={};registry.dependencies={}
 local function initialize(key)
@@ -690,6 +719,7 @@ function registry.start(finalize)
   end
  end
  registry.state='ready'
+ registerSetupPanel(AC8Runtime)
  
 end
 registry.start()
@@ -700,8 +730,8 @@ do
  local function warningText()
   if imgui.text_colored then imgui.text_colored('OPENXR + NATIVE STEREO REQUIRED',0xff40c0ff)
   else imgui.text('OPENXR + NATIVE STEREO REQUIRED')end
-  imgui.text('OpenVR is active. This profile requires OpenXR; HUD glow cannot work here.')
-  imgui.text('Restart the game, select OpenXR in the UEVR injector, and use Native Stereo.')
+  imgui.text('OpenVR is active but this profile requires OpenXR.')
+  imgui.text('Restart the game, select OpenXR in the UEVR injector.')
   imgui.text('SteamVR users: set SteamVR as your OpenXR runtime. You can keep using SteamVR.')
  end
  uevr.sdk.callbacks.on_draw_ui(function()
