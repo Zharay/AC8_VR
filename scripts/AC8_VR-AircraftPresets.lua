@@ -233,7 +233,7 @@ local function newAircraftPresetStore(files,defaults)
 end
 
 -- This module owns aircraft UI Size; Core only retains generic crash/removal recovery.
-local function newFlightUISize(files,vr,store,enabled)
+local function newFlightUISize(files,vr,store,enabled,setSaveMessage)
  local S={store=store,journal='AC8_VR-FlightUISizeRestore.json'}
  local function number(v)v=tonumber(v);return v and v==v and v>=.01 and v<=100 and v or nil end
  local function same(a,b)return a and b and math.abs(a-b)<1e-5*math.max(1,math.abs(b))end
@@ -310,15 +310,17 @@ local function newFlightUISize(files,vr,store,enabled)
   if not S.db or not plane(key)or S.currentPlane~=key then return false,'Enter flight in the selected aircraft before saving UI Size.'end
   local v=S.read();if not v then return false,'UEVR UI Size is unavailable.'end
   local next=clone(S.db);next.planes[key]=v;local ok,why=persist(next)
-  if ok then S.selection=key;S.message='Saved UI Size for current plane.'end
-  return ok,why or S.message
+  local message='Saved UI Size for current plane.'
+  if ok then S.selection=key;setSaveMessage(S,message)end
+  return ok,why or message
  end
  function S.useDefault(key)
   if enabled and not enabled()then return false,'Enable per-plane settings before changing an aircraft preset.'end
   if not S.db or not plane(key)or S.currentPlane~=key then return false,'Enter flight before resetting this aircraft UI Size.'end
   local next=clone(S.db);next.planes[key]=nil;local ok,why=persist(next)
-  if ok then S.selection=nil;S.update(key);S.message='This plane now uses your normal UI Size.'end
-  return ok,why or S.message
+  local message='This plane now uses your normal UI Size.'
+  if ok then S.selection=nil;S.update(key);setSaveMessage(S,message)end
+  return ok,why or message
  end
  return S
 end
@@ -333,6 +335,9 @@ local function attachAircraftUI(owner,R)
  local function queueProfileAction(kind,value)
   local controls=R.hudLayoutControls
   owner.pending={kind=kind,plane=profilePlane(),layout=controls and controls.snapshot()or nil,value=value}
+ end
+ R.queueFlightUISizeAction=function(kind)
+  if kind=='uiSize'or kind=='uiSizeDefault'then queueProfileAction(kind)end
  end
  function owner.processUIActions()
   local action=owner.pending;owner.pending=nil;if not action then return end
@@ -369,7 +374,7 @@ local function attachAircraftUI(owner,R)
    if not saved then ok=false;msg=tostring(msg)..' UI Size was not saved: '..tostring(why)else msg=tostring(msg)..' UI Size saved too.'end
   end
   if ok and R.hudLayoutControls and(action.kind=='plane'or action.kind=='all'or action.kind=='both'or action.kind=='hudGlobal')then R.hudLayoutControls.saved()end
-  owner.message=msg or(ok and'HUD layout selection changed.'or'Nothing saved.')
+  R.setSaveMessage(owner,msg or(ok and'HUD layout selection changed.'or'Nothing saved.'))
  end
 local function uiSection(label)
     if imgui.spacing then imgui.spacing()end
@@ -377,77 +382,82 @@ local function uiSection(label)
     if label then imgui.text(label)end
     if imgui.spacing then imgui.spacing()end
 end
+local function settingCheckbox(label,value,disabled)
+    if imgui.begin_disabled and imgui.end_disabled then
+        imgui.begin_disabled(disabled)
+        local changed,nextValue=imgui.checkbox(label,value)
+        imgui.end_disabled()
+        return changed,nextValue
+    end
+    if disabled then
+        if imgui.text_disabled then imgui.text_disabled(label)else imgui.text(label)end
+        return false,value
+    end
+    return imgui.checkbox(label,value)
+end
+local function settingTooltip(text)
+    if not imgui.same_line or not imgui.is_item_hovered or not imgui.set_tooltip then return end
+    imgui.same_line()
+    if imgui.text_disabled then imgui.text_disabled('(?)')else imgui.text('(?)')end
+    if imgui.is_item_hovered()then imgui.set_tooltip(text)end
+end
 owner.drawUI=function()
     if not imgui then return end
     hudProfiles.currentPlane=profilePlane()
+
+    -- Aircraft presets section
     uiSection('Aircraft presets')
-    if not hudProfiles.db then imgui.text('Enter flight once to initialize HUD presets.');return end
-    if R.aircraftPresets then
-        local masterChanged,masterValue=imgui.checkbox('Enable per-plane settings',hudProfiles.db.perPlaneEnabled~=false)
-        if masterChanged then queueProfileAction('perPlaneMode',masterValue)end
-    else imgui.text('AC8_VR-AircraftPresets.lua is absent. Shared HUD controls remain available.')end
-    if hudProfiles.db.perPlaneEnabled==false then imgui.text('Per-plane overrides are off. Saved presets are retained; general HUD controls remain available.')end
-    if R.aircraftPresets then
-        local changed,value=imgui.checkbox('Use default HUD layout for all planes',hudProfiles.db.useDefaultForAllPlanes)
-        if changed then queueProfileAction('mode',value)end
-        imgui.text('With both on, all planes share one HUD layout.')
-        imgui.text('Each plane can still use its own camera and flight canvas size.')
+    if not hudProfiles.db then
+        if imgui.text_colored then imgui.text_colored('Enter flight once to initialize HUD presets.',0xff00ffff)
+        else imgui.text('Enter flight once to initialize HUD presets.')end
+        return
     end
+    if R.aircraftPresets then
+        local masterChanged,masterValue=imgui.checkbox('Enable aircraft-specific settings',hudProfiles.db.perPlaneEnabled~=false)
+        if masterChanged then queueProfileAction('perPlaneMode',masterValue)end
+        settingTooltip('When enabled, saved HUD layouts, cockpit camera positions, flight UI Size and cockpit size can vary by aircraft.')
+    else imgui.text('AC8_VR-AircraftPresets.lua is absent. Shared HUD controls remain available.')end
+    local perPlaneEnabled=hudProfiles.db.perPlaneEnabled~=false
+    if not perPlaneEnabled then imgui.text('Aircraft-specific settings are off. Saved overrides are retained.')end
+    if R.aircraftPresets then
+        local changed,value=settingCheckbox('Use one HUD layout for all aircraft',hudProfiles.db.useDefaultForAllPlanes,not perPlaneEnabled)
+        if changed and perPlaneEnabled then queueProfileAction('mode',value)end
+        settingTooltip('When enabled, every aircraft uses the shared HUD layout. When disabled, an aircraft uses its saved HUD layout when available, otherwise the shared layout.')
+        local showChanged,showValue=imgui.checkbox('Show only relevant settings',hudProfiles.showOnlyRelevantSettings~=false)
+        if showChanged then hudProfiles.showOnlyRelevantSettings=showValue;R.showOnlyRelevantSettings=showValue end
+        settingTooltip('When enabled, save actions are filtered to match whether aircraft-specific settings are enabled.')
+    end
+    hudProfiles.showOnlyRelevantSettings=hudProfiles.showOnlyRelevantSettings~=false
+    R.showOnlyRelevantSettings=hudProfiles.showOnlyRelevantSettings
     local plane=hudProfiles.currentPlane
     local label=plane and(plane:match('^BP_PlayerPlane_PP%d+_(.-)_C$')or plane):upper()or'No active aircraft'
+    imgui.text('')
     imgui.text('Current aircraft: '..label)
     imgui.text('HUD source: '..(hudProfiles.lastSource or'all planes')..' | Aircraft HUD presets: '..hudProfiles:count())
-    uiSection('Global defaults')
-    if R.hudLayoutControls and imgui.button('Save current HUD as global default')then queueProfileAction('hudGlobal')end
-    if imgui.button('Save current camera as global default')then queueProfileAction('cameraGlobal')end
-    imgui.text('Global HUD updates the fallback/shared layout. Camera saves position only.')
-    imgui.text('Saved aircraft presets are preserved.')
-    if R.aircraftPresets then
-        uiSection('Camera and Combined Saves')
-        if imgui.button('Save cockpit camera for current plane')then queueProfileAction('camera')end
-        if R.hudLayoutControls and imgui.button('Save HUD + cockpit camera for current plane')then queueProfileAction('both')end
-    end
-    uiSection('HUD Layout Saves')
-    if R.hudLayoutControls and imgui.button('Save HUD layout for current plane')then queueProfileAction('plane')end
-    if R.hudLayoutControls and imgui.button('Save HUD layout for ALL planes')then queueProfileAction('all')end
-    if imgui.spacing then imgui.spacing()end
-    if R.hudLayoutControls and imgui.button('Reset HUD to saved layout')then queueProfileAction('reset')end
-    imgui.text('Shared and aircraft layouts are separate. Reset uses the selected mode and saved fallbacks.')
-    if hudProfiles.message~=''then imgui.text(hudProfiles.message)end
-    local uiSize=R.flightUISize
-    if uiSize then
-        uiSection('Flight UI Canvas Size')
-        local current=uiSize.read()
-        imgui.text('Current UI Size: '..(current and string.format('%.3g',current)or'unavailable'))
-        imgui.text('Normal UI Size: '..(uiSize.db and string.format('%.3g',uiSize.db.defaultSize)or'waiting'))
-        if imgui.button('Save UI Size for current plane')then queueProfileAction('uiSize')end
-        if imgui.button('Use normal UI Size for current plane')then queueProfileAction('uiSizeDefault')end
-        imgui.text('This will only affect the size of the canvas for this particular plane,')
-        imgui.text('and only during flight. This will allow you to make the canvas much larger')
-        imgui.text('and then you can counter-scale down the HUD elements to put them more to')
-        imgui.text('the sides, or much further down.')
-        imgui.text(' ')
-        imgui.text('Adjust UI Size in the UEVR Menu. HUD saves for this plane include it too.')
-        imgui.text('Independent of shared HUD layout. Pause/retry keep the flight size; other modes use normal size.')
-        if uiSize.message then imgui.text(uiSize.message)end
-    end
-    local camera=R.planeSpecificOffset
-    if camera and camera.getCockpitSize and plane and hudProfiles.db.perPlaneEnabled~=false then
-        uiSection('Cockpit size (cockpit view only)')
-        local enabled,size=camera.getCockpitSize(plane)
-        local changed,value=imgui.checkbox('Customize cockpit size for this plane',enabled)
-        if changed then enabled=value;camera.setCockpitSize(plane,enabled,size)end
-        if enabled then
-            local edited,nextSize=imgui.slider_float('Cockpit size multiplier',size,.5,2)
-            if edited then size=nextSize;camera.setCockpitSize(plane,true,size)end
-            if imgui.button('Cockpit size -0.01')then camera.setCockpitSize(plane,true,math.max(.5,size-.01))end
-            if imgui.same_line then imgui.same_line()end
-            if imgui.button('Cockpit size +0.01')then camera.setCockpitSize(plane,true,math.min(2,size+.01))end
-            if imgui.button('Reset cockpit size to 1.0x')then camera.setCockpitSize(plane,true,1)end
+
+    uiSection('Save Settings')
+    local showRelevant=hudProfiles.showOnlyRelevantSettings
+    local showAircraftSaves=not showRelevant or perPlaneEnabled
+    local showSharedSaves=not showRelevant or not perPlaneEnabled
+    if showSharedSaves then
+        if R.hudLayoutControls and imgui.button('Save current HUD as global default')then queueProfileAction('hudGlobal')end
+        if R.hudLayoutControls and imgui.is_item_hovered and imgui.is_item_hovered()and imgui.set_tooltip then
+            imgui.set_tooltip('Global HUD updates the fallback/shared layout. Saved aircraft presets are preserved.')
         end
-        imgui.text('Higher = larger pilot/cockpit/world. Save with the cockpit camera button above.')
-        if camera.cockpitSize and camera.cockpitSize.message then imgui.text(camera.cockpitSize.message)end
+        if R.planeSpecificOffset and imgui.button('Save current camera as global default')then queueProfileAction('cameraGlobal')end
+        if R.hudLayoutControls and imgui.button('Save HUD layout for ALL planes')then queueProfileAction('all')end
     end
+    if showAircraftSaves and R.aircraftPresets then
+        if R.planeSpecificOffset and imgui.button('Save cockpit camera for current plane')then queueProfileAction('camera')end
+        if R.planeSpecificOffset and R.hudLayoutControls and imgui.button('Save HUD + cockpit camera for current plane')then queueProfileAction('both')end
+        if R.hudLayoutControls and imgui.button('Save HUD layout for current plane')then queueProfileAction('plane')end
+    end
+    if R.hudLayoutControls and imgui.button('Reset HUD to saved layout')then queueProfileAction('reset')end
+    if R.hudLayoutControls and imgui.is_item_hovered and imgui.is_item_hovered()and imgui.set_tooltip then
+        imgui.set_tooltip('Reset uses the selected HUD mode and its saved fallbacks.')
+    end
+    if hudProfiles.message~=''then imgui.text(hudProfiles.message)end
+    R.drawSaveMessage(hudProfiles)
     if imgui.separator then imgui.separator()end
 end
 
@@ -459,7 +469,7 @@ registry.sections.aircraft_presets=function(R)
  local owner=newAircraftPresetStore({load_file=json.load_file,dump_file=json.dump_file,read=fs and fs.read},R.hudDefaults)
  owner:init(nil);R.aircraftPresets=owner;R.hudProfiles=owner
  R.perPlaneSettingsEnabled=owner.db and owner.db.perPlaneEnabled~=false and not owner.invalid
- R.flightUISize=newFlightUISize(json,uevr.params.vr,owner,function()return R.perPlaneSettingsEnabled~=false end)
+ R.flightUISize=newFlightUISize(json,uevr.params.vr,owner,function()return R.perPlaneSettingsEnabled~=false end,R.setSaveMessage)
  R.flightUISize.recoveryFailed=R.errors and R.errors['AC8_VR-FlightUISizeRestore.json']~=nil
  local host=R.host('presentation','aircraft UI Size')
  host.sdk.callbacks.on_pre_engine_tick(function()
@@ -470,7 +480,7 @@ registry.sections.aircraft_presets=function(R)
  end)
  attachAircraftUI(owner,R)
  host.sdk.callbacks.on_post_engine_tick(owner.processUIActions)
- host.sdk.callbacks.on_draw_ui(owner.drawUI)
+ R.setupAircraft=owner.drawUI
  host.sdk.callbacks.on_script_reset(R.flightUISize.restore)
 end
 

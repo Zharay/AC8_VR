@@ -16,7 +16,7 @@ AC8 VR is a community profile for playing Ace Combat 8 in VR. Version 0.3.3 fixe
 
 ## Set up your cockpit
 
-1. Enter a mission in **cockpit view**. Open the UEVR menu, enable **Advanced Mode**, and open **Script UI**.
+1. Enter a mission in **cockpit view**. Open the UEVR menu, enable **Advanced Mode**, and open **Lua → AC8 VR Setup** (or **Script UI** on older UEVR builds without custom panels).
 2. Under **Modify position of Grouped HUD Elements**, use the X, Y and scale controls for the groups you want to change. Under **Aircraft presets**, enable **Enable per-plane settings**, turn off **Use default HUD layout for all planes**, and click **Save HUD layout for current plane**. That save also records the current UEVR **UI Size**.
 3. Adjust UEVR's camera offsets while in the cockpit. Under **Camera and Combined Saves**, click **Save cockpit camera for current plane**, or **Save HUD + cockpit camera for current plane** to save both. Cockpit size is also saved with the camera.
 

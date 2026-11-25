@@ -15,13 +15,17 @@ Keep Core enabled. The other seven scripts are independently optional. Uncheck a
 
 ## Aircraft and global defaults
 
+Open **UEVR → Lua → AC8 VR Setup** for HUD layout and aircraft controls. On older UEVR builds without custom panels, these controls remain in **Script UI**.
+
+Save-result messages (success or failure) clear after 15 seconds. A new result restarts the timer. Persistent configuration and recovery warnings remain visible.
+
 `data/AC8_VR-AircraftPresets.json` is the single aircraft data set. Entries can contain camera offsets, HUD layout, flight UI Size and cockpit-size/world-scale preferences. Unset fields use their default/fallback. Only a few aircraft are pre-tuned.
 
 `data/AC8_VR-HUDDefaults.json` stores default/shared HUD layouts separately. **Save current HUD as global default** updates the fallback/shared layouts; **Save current camera as global default** changes the default position. Neither overwrites per-aircraft presets.
 
-**Enable per-plane settings** disables all aircraft overrides without deleting data. **Use default HUD layout for all planes** selects the separate shared layout and does not overwrite custom aircraft layouts. The reset button reloads the layout selected by the current mode and its fallback.
+**Enable aircraft-specific settings** allows saved HUD layouts, cockpit camera positions, flight UI Size and cockpit size to vary by aircraft. Turning it off ignores those overrides but retains them. **Use one HUD layout for all aircraft** selects the shared HUD layout without overwriting custom aircraft layouts; it is disabled while aircraft-specific settings are off. With aircraft-specific settings off, all aircraft use the shared HUD layout regardless of this option. **Show only relevant settings** filters save actions according to whether aircraft-specific settings are on; turn it off to see all save actions. This display preference lasts for the current script session.
 
-Adjust UI Size in UEVR and save it for the plane, either with its separate save button or a HUD save. Flight UI Size includes pause/retry; other modes use the user's normal size. Cockpit size applies only to cockpit view and changes perceived scale, not headset FOV. Its save is included with cockpit-camera saves.
+Adjust UI Size in UEVR and save it for the plane in the expandable **Flight UI Canvas Size** section below **Weapon projection calibration** when an aircraft is active. The **Cockpit size (cockpit view only)** controls appear directly below it. Flight UI Size includes pause/retry; other modes use the user's normal size. Cockpit size changes perceived scale, not headset FOV; save it with the cockpit-camera save action.
 
 The FPM follows ladder movement/scale and retains native velocity motion. Separate FPM alignment controls provide an additional trim. Mission information and wingman status each have their own scale controls.
 

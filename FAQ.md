@@ -19,13 +19,13 @@ Keep the supplied plugin files and assets together. For per-plane HUD saves, kee
 
 ### How do I save a HUD layout for one plane?
 
-Fly that aircraft in cockpit view. In **UEVR → Script UI**, adjust the grouped HUD sliders. In **Aircraft presets**, enable **Enable per-plane settings**, turn off **Use default HUD layout for all planes**, then click **Save HUD layout for current plane**. The HUD save includes UEVR's current **UI Size**.
+Fly that aircraft in cockpit view. In **UEVR → Lua → AC8 VR Setup**, adjust the grouped HUD sliders. On older UEVR builds without custom panels, use **Script UI** instead. In **Aircraft presets**, enable **Enable per-plane settings**, turn off **Use default HUD layout for all planes**, then click **Save HUD layout for current plane**. The HUD save includes UEVR's current **UI Size**.
 
 To use a common layout, use **Save HUD layout for ALL planes** and enable **Use default HUD layout for all planes**. Use **Save current HUD as global default** to update the fallback and shared layout.
 
 ### How do I save where I sit in the cockpit?
 
-While in the cockpit, adjust the camera offsets in UEVR. You can also open the UEVR menu, hold the right trigger on an Xbox-style controller, and use the sticks to move the camera. In **Script UI → Aircraft presets → Camera and Combined Saves**, click **Save cockpit camera for current plane**. Use **Save HUD + cockpit camera for current plane** if you adjusted both. **Save current camera as global default** sets the fallback for other planes.
+While in the cockpit, adjust the camera offsets in UEVR. You can also open the UEVR menu, hold the right trigger on an Xbox-style controller, and use the sticks to move the camera. In **Lua → AC8 VR Setup → Aircraft presets → Camera and Combined Saves** (or **Script UI** on older UEVR builds), click **Save cockpit camera for current plane**. Use **Save HUD + cockpit camera for current plane** if you adjusted both. **Save current camera as global default** sets the fallback for other planes.
 
 ### Do I need OFXR Bridge?
 

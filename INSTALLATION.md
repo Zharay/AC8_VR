@@ -5,7 +5,7 @@
 1. Close the game. Back up your entire `%APPDATA%\UnrealVRMod\AceCombat8` profile, then move the old folder out of `UnrealVRMod`.
 2. Extract `AC8-VR_MankTank_v0.3.3.zip` into `%APPDATA%\UnrealVRMod`. The ZIP creates an `AceCombat8` folder with `scripts`, `data`, `plugins`, `config.txt` and `cvars_data.txt`.
 3. Connect your headset and start its PC VR runtime. Launch the game with your EAC bypass setup. Open UEVR, select `AceCombat8.exe`, choose **OpenXR**, enable plugins, and inject. Use **Native Stereo**.
-4. Enter a mission and check the HUD. Open **Script UI** for layout and aircraft saves. See the [FAQ](FAQ.md) for the controls.
+4. Enter a mission and check the HUD. Open **Lua → AC8 VR Setup** for layout and aircraft saves, or **Script UI** on older UEVR builds without custom panels. See the [FAQ](FAQ.md) for the controls.
 
 Use the supplied profile as a set. The [file manifest](PROFILE-FILES.txt) lists the runtime files for a manual install from source. Keep the loader, feature payload, OpenXR bridge, manifest and shader assets together in the profile. Keep `AC8_VR-Core.lua` enabled. The seven other scripts are optional.
 
