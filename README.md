@@ -12,6 +12,7 @@ AC8 VR is a community profile for playing Ace Combat 8 in VR. Version 0.3.3 fixe
 - Separate HUD layouts, cockpit camera positions and UI sizes for each aircraft, plus global defaults.
 - HUD glow in flight, clearer world target labels and smaller off-screen indicators.
 - Better framing in cinematics and the hangar, cleaner loading transitions, readable tutorial cards, and pause/retry navigation that advances one step per press.
+- Optional immersive cinematics and hangar menus with customizable camera positions for menus that support it.
 - Optional modules so you can choose which enhancements to use.
 
 ## Set up your cockpit
