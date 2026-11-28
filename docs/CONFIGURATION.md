@@ -27,9 +27,9 @@ The FPM follows ladder movement/scale and retains native velocity motion. Separa
 
 ## Cockpit origin after camera takeovers
 
-AircraftPresets remembers the live UEVR offsets while an owned first-person/cockpit camera is actually supplying the game camera. Returning from a cinematic or mission retry to the same aircraft and view restores those live offsets, rather than replacing them with saved defaults. This also covers initial flight when the selected-view bootstrap is unavailable: a later camera-view event must not silently change the seat position.
+AircraftPresets remembers the live UEVR offsets separately for cockpit and first-person (no cockpit) views while an owned camera is actually supplying the game camera. Returning to either view after a view switch, cinematic or mission retry restores that view's live offsets, rather than replacing them with saved defaults. Third-person offsets remain zero without discarding the remembered cockpit position. This also covers initial flight when the selected-view bootstrap is unavailable: a later camera-view event must not silently change the seat position.
 
-Actual aircraft/view changes and configuration edits still select saved preferences. Menu/hangar entry clears the in-memory return position. No game camera transform, headset calibration, HUD size or saved aircraft preference is changed by this restoration; it uses the existing transactional UEVR settings owner and works without the Cinematics module.
+Actual aircraft changes, configuration edits and master-enable changes clear remembered views and select saved preferences; a first visit to an unremembered view also uses its configured fallback. Menu/hangar entry clears the in-memory return positions. No game camera transform, headset calibration, HUD size or saved aircraft preference is changed by this restoration; it uses the existing transactional UEVR settings owner and works without the Cinematics module.
 
 ## First launch and runtime state
 

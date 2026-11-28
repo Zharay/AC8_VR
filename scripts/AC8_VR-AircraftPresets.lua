@@ -697,7 +697,7 @@ local function update()
  local ci=rawget(_G,'AC8_CinematicIntent')
  local hud=R.context.hudName or''
  if hud:match('^BP_LiveMenuHUD_C ')or hud:match('^BP_LiveHangarHUD_C ')then
-  S.resume=nil;S.resumePending=nil;S.resumeOverride=nil
+  S.resume=nil;S.resumeViews=nil;S.resumePending=nil;S.resumeOverride=nil
  end
  if presentationOwns(ci)then
   S.resumePending=S.resume~=nil;sizeRestore();S.selection=nil;status.state='cinematic/hangar owns camera';return
@@ -711,10 +711,11 @@ local function update()
  if not sizeState.recoveryFailed then updateCockpitSize(class,viewInfo)end
  local admitted=viewInfo and viewInfo.firstPersonAllowed==true
  local renderedView=renderedFirstPerson(target,viewInfo)
- if third or(class and S.resume and S.resume.class~=class)then
-  S.resume=nil;S.resumePending=nil;S.resumeOverride=nil
+ if S.resume and((class and S.resume.class~=class)or S.resume.revision~=S.revision or
+  S.resume.perPlaneEnabled~=(R.perPlaneSettingsEnabled~=false))then
+  S.resume=nil;S.resumeViews=nil;S.resumePending=nil;S.resumeOverride=nil
  elseif S.resume and(S.resume.name~=name or not R.context.flight or not class or R.matchState()~='InProgress'or
-  (viewInfo and viewInfo.selectedView~=nil and not admitted))then
+  (viewInfo and viewInfo.selectedView~=nil and viewInfo.selectedView~=S.resume.view))then
   S.resumePending=true
  end
  status.aircraftClass=class;status.viewTarget=name;status.viewDetection=viewInfo
@@ -728,7 +729,7 @@ local function update()
  if not S.config.enabled and not S.owned then status.state='disabled';return end
  local key=selection..':'..S.revision..':'..(admitted and name or '')..':'..tostring(viewInfo and viewInfo.selectedView)
  if S.resumeOverride and S.resumeOverride.key~=key then S.resumeOverride=nil end
- local resume=S.resumePending and S.resume
+ local resume=(S.resumePending or S.selection~=key)and S.resumeViews and S.resumeViews[renderedView]
  local restoring=admitted and renderedView~=nil and resume and resume.class==class and
   resume.view==renderedView and resume.revision==S.revision and resume.perPlaneEnabled==(R.perPlaneSettingsEnabled~=false)
  if restoring then desired=resume.value
@@ -746,18 +747,19 @@ local function update()
   S.resumePending=nil
  end
  status.state=not admitted and'outside first-person; zero UEVR offset'or S.config.enabled and(selection=='default'and'default UEVR position'or'aircraft UEVR position')or'disabled; default restored'
- if admitted and S.resumeOverride then status.state='pre-takeover live UEVR position restored'end
+ if admitted and S.resumeOverride then status.state='remembered live UEVR view position restored'end
  S.thirdPerson=third;S.firstPersonAllowed=admitted
  status.forward=desired.forward;status.right=desired.right;status.up=desired.up
  if renderedView~=nil and S.config.enabled then
   local value=observed()
   if value then
    S.resume={class=class,name=name,view=renderedView,revision=S.revision,value=value,perPlaneEnabled=R.perPlaneSettingsEnabled~=false}
+   S.resumeViews=S.resumeViews or{};S.resumeViews[renderedView]=S.resume
   else status.error='Live camera offsets unavailable; pre-takeover position could not be captured'end
  end
  
  -- Manual menu tuning is allowed until the next
- -- aircraft/view change or configuration edit. Camera takeovers retain live tuning.
+ -- aircraft change or configuration edit. View switches and takeovers retain live tuning.
 end
 host.sdk.callbacks.on_post_engine_tick(update)
 host.sdk.callbacks.on_script_reset(function()
