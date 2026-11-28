@@ -29,6 +29,8 @@ From this directory run `build.ps1` using x64 MSVC C++ Build Tools and a Windows
 - Preserve module removal, including recovery of any temporarily owned UEVR setting. No resolution, headset model or GPU vendor may be a required assumption.
 - Presentation saves/restores settings transactionally; retain recovery state until restoration succeeds. Aircraft settings defer to presentation ownership. Outside their admitted scopes, restore ordinary values.
 - Selected first-person views use absolute saved camera offsets. Cockpit perceived-size/world-scale changes are cockpit-only; no headset FOV modification. Keep manual tuning between actual scope/aircraft changes.
+- Core supplies demand-driven, delegate/bootstrap-verified selected-view facts. AircraftPresets restores live offsets after same-aircraft/view camera takeovers; current owned rendered-camera evidence permits capture even while initial selected-view bootstrap is unavailable. Do not replace a user's live seating position with defaults solely because retry supplies the first view event.
+- UEVR Lua stereo callbacks expose rotation as Vector3f/d (`x` = pitch, `y` = yaw, `z` = roll), not the C API's Rotator fields. Validate fixtures against the actual Lua binding shape.
 - UI Size uses the selected plane in flight, including pause/retry; non-flight modes use the user's normal value. Master-off retains every preset.
 - Tutorial uses its native card fill, with the extra rectangle absent and tutorial blur disabled. Pause/retry advance once per real input.
 - Keep ladder/FPM presentation linkage and independent alignment trim separate from native flight-vector motion and world/bomb projection math.

@@ -137,6 +137,75 @@ local function newSharedDiscovery(R,real)
 end
 -- End shared discovery service.
 
+local function newPlaneView(R,real)
+ local S={}
+ local host=R.host('admission','selected aircraft view')
+ local function call(o,k,...)return R.objectCall(o,k,...)end
+ local function selected(value)
+  if type(value)=='number'and value==math.floor(value)and value>=0 and value<=5 then return value end
+ end
+ local function viewChanged(_,object,locals)
+  if S.stopped or object~=S.viewOwner or not R.isLiveObject(object)then return end
+  local success,value=pcall(function()return locals.CameraViewType end)
+  if success and selected(value)~=nil then
+   S.selectedView=value;S.viewEventRevision=(S.viewEventRevision or 0)+1
+   S.viewSource='game OnCameraViewChanged'
+  end
+ end
+ local function ensureViewHook()
+  if S.viewHook or R.tick<(S.hookRetryAt or 0)then return end
+  S.hookRetryAt=R.tick+60
+  local ok,fn=pcall(function()return real.api:find_uobject('Function /Script/Live.LivePlayerPlane.OnCameraViewChanged')end)
+  if not ok or not R.isLiveObject(fn)then return end
+  local good,result=pcall(function()fn=fn:as_function();return fn:hook_ptr(nil,viewChanged)end)
+  if good and result~=false then S.viewHook=fn end
+ end
+ local function bootstrap(view)
+  S.bootstrapSerial=(S.bootstrapSerial or 0)+1;S.bootstrapRevision=S.viewEventRevision or 0
+  local ok=pcall(function()real.api:dispatch_custom_event('AC8_PlaneViewBootstrap',tostring(S.bootstrapSerial)..'|'..view)end)
+  if not ok then R.errors.planeView='Selected-view bootstrap dispatch failed' end
+ end
+ host.sdk.callbacks.on_lua_event(function(event,data)
+  if S.stopped or event~='AC8_PlaneViewBootstrapResult'or type(data)~='string'then return end
+  local serial,value=data:match('^(%d+)|(-?%d+)$');serial=tonumber(serial);value=tonumber(value)
+  if serial~=S.bootstrapSerial or S.bootstrapRevision~=(S.viewEventRevision or 0)then return end
+  if selected(value)~=nil then S.selectedView=value;S.viewSource='verified selected-view bootstrap' end
+ end)
+ function S.get(target,targetName)
+  ensureViewHook()
+  if S.viewOwner~=target or S.viewOwnerName~=targetName then
+   S.viewOwner=target;S.viewOwnerName=targetName;S.viewComponent=nil;S.viewResolveAt=0;S.selectedView=nil;S.viewSource=nil
+   S.viewEventRevision=(S.viewEventRevision or 0)+1
+  end
+  local view=S.viewComponent
+  if view and(not R.isLiveObject(view)or call(view,'GetOwner')~=target)then
+   S.viewComponent=nil;view=nil;S.selectedView=nil;S.viewResolveAt=0
+   S.viewEventRevision=(S.viewEventRevision or 0)+1
+  end
+  if not view and R.tick>=(S.viewResolveAt or 0)then
+   S.viewResolveAt=R.tick+60
+   if not R.isLiveObject(S.cameraViewClass)then
+    local ok,cls=pcall(function()return real.api:find_uobject('Class /Script/Live.LiveCameraViewComponent')end)
+    S.cameraViewClass=ok and cls or nil
+   end
+   local found=R.isLiveObject(S.cameraViewClass)and call(target,'GetComponentByClass',S.cameraViewClass)or nil
+   local n=call(found,'get_full_name')or''
+   if n:match('^LiveCameraViewComponent ')and call(found,'GetOwner')==target then
+    S.viewComponent=found;view=found;S.viewComponentName=n;bootstrap(n)
+   end
+  end
+  if view and not S.viewHook and R.tick>=(S.bootstrapRetryAt or 0)then
+   S.bootstrapRetryAt=R.tick+60;bootstrap(S.viewComponentName)
+  end
+  local value=S.selectedView
+  return value==2,{selectedView=value,selectedViewName=({[0]='first-person',[1]='cockpit',[2]='third-person'})[value]or'unknown/special',
+   viewComponent=S.viewComponentName,confirmedThirdPerson=value==2,firstPersonAllowed=value==0 or value==1,
+   detection=S.viewSource or'waiting for selected view',eventHookInstalled=S.viewHook~=nil}
+ end
+ host.sdk.callbacks.on_script_reset(function()S.stopped=true end)
+ return S
+end
+
 -- Shared pause/tutorial support, owned by Core.
 local function ensureTutorialState(R)
  if R.tutorialState then return R.tutorialState end
@@ -501,6 +570,11 @@ R.json={load_file=R.read,dump_file=function(name,value,indent)
 end}
 function R.log()end
 R.inventory=newSharedDiscovery(R,real)
+-- Demand-driven; no selected-view discovery unless an installed camera owner asks.
+R.getPlaneView=function(target,name)
+ if not R.planeView then R.planeView=newPlaneView(R,real)end
+ return R.planeView.get(target,name)
+end
 real.sdk.callbacks.on_script_reset(function()R.inventory.invalidate()end)
 R.connect('on_pre_engine_tick')
 

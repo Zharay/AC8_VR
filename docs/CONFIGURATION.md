@@ -35,6 +35,12 @@ Open **UEVR → Lua → AC8 VR Scene Presentation** and check **Toggle Immersive
 
 With the hangar main menu or aircraft tree open, adjust UEVR's forward, right, and up camera offsets. **Save global hangar camera** saves the fallback for that menu. **Save camera for current map** saves a separate position for the current map and menu; **Delete camera for current map** removes it and reapplies the global fallback. Map-specific controls appear when the current world is identified; different streamed scenery in the same world may share a position. If no map-specific position exists, the global position is used; an unsaved global position defaults to `0, 0, 0`. Other hangar menus use `0, 0, 0`; leaving the hangar restores the previous offsets. This does not change any aircraft preset. The toggle and hangar cameras are stored in the profile's `data/AC8_VR-ScenePresentation.json`; existing global saves are retained.
 
+## Cockpit origin after camera takeovers
+
+AircraftPresets remembers the live UEVR offsets while an owned first-person/cockpit camera is actually supplying the game camera. Returning from a cinematic or mission retry to the same aircraft and view restores those live offsets, rather than replacing them with saved defaults. This also covers initial flight when the selected-view bootstrap is unavailable: a later camera-view event must not silently change the seat position.
+
+Actual aircraft/view changes and configuration edits still select saved preferences. Menu/hangar entry clears the in-memory return position. No game camera transform, headset calibration, HUD size or saved aircraft preference is changed by this restoration; it uses the existing transactional UEVR settings owner and works without the Cinematics module.
+
 ## First launch and runtime state
 
 With native cropped hangar presentation active, matching flat UI/movie planes
