@@ -25,6 +25,12 @@ Adjust UI Size in UEVR and save it for the plane, either with its separate save 
 
 The FPM follows ladder movement/scale and retains native velocity motion. Separate FPM alignment controls provide an additional trim. Mission information and wingman status each have their own scale controls.
 
+## Cockpit origin after camera takeovers
+
+AircraftPresets remembers the live UEVR offsets while an owned first-person/cockpit camera is actually supplying the game camera. Returning from a cinematic or mission retry to the same aircraft and view restores those live offsets, rather than replacing them with saved defaults. This also covers initial flight when the selected-view bootstrap is unavailable: a later camera-view event must not silently change the seat position.
+
+Actual aircraft/view changes and configuration edits still select saved preferences. Menu/hangar entry clears the in-memory return position. No game camera transform, headset calibration, HUD size or saved aircraft preference is changed by this restoration; it uses the existing transactional UEVR settings owner and works without the Cinematics module.
+
 ## First launch and runtime state
 
 The editable `HUD_PRESENTATION` block in HUD Layout supplies initial distance 1m, size 1 and curvature 113.625 degrees. The generated `AC8_VR-HUDPresentationSetup.json` marker admits this once; later saved UEVR changes are respected. It must be absent from a fresh-install archive and retained for an existing user's profile.

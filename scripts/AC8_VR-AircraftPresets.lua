@@ -548,67 +548,37 @@ local function presentationOwns(ci)
  return R.settingsBusy('camera','plane')or ci and(ci.maskActive or ci.hangarActive or ci.cameraLocked or ci.shotOverridesActive or ci.guardForced or ci.recoveringUI or
   (ci.saved and next(ci.saved)~=nil)or(ci.hangarSaved and next(ci.hangarSaved)~=nil)or ci.detectedMode=='cinematic'or ci.detectedMode=='hangar')
 end
--- Executable-verified view selection: 0 = first person, 1 = cockpit,
--- 2 = third person. The three transition bodies write +0x108 and broadcast
--- OnCameraViewChanged. Component IsActive is not this selected-view enum.
-local function selected(value)
- if type(value)=='number'and value==math.floor(value)and value>=0 and value<=5 then return value end
-end
-local function viewChanged(_,object,locals)
- if S.stopped or object~=S.viewOwner or not R.isLiveObject(object)then return end
- local success,value=pcall(function()return locals.CameraViewType end)
- if success and selected(value)~=nil then
-  S.selectedView=value;S.viewEventRevision=(S.viewEventRevision or 0)+1
-  S.viewSource='game OnCameraViewChanged';
- end
-end
-
-local function ensureViewHook()
- if S.viewHook or R.tick<(S.hookRetryAt or 0)then return end
- S.hookRetryAt=R.tick+60
- local ok,fn=pcall(function()return uevr.api:find_uobject('Function /Script/Live.LivePlayerPlane.OnCameraViewChanged')end)
- if not ok or not fn then return end
- local good,result=pcall(function()fn=fn:as_function();return fn:hook_ptr(nil,viewChanged)end)
- if good and result~=false then S.viewHook=fn end
-end
-host.sdk.callbacks.on_lua_event(function(event,data)
- if S.stopped or event~='AC8_PlaneViewBootstrapResult'or type(data)~='string'then return end
- local serial,value=data:match('^(%d+)|(-?%d+)$');serial=tonumber(serial);value=tonumber(value)
- if serial~=S.bootstrapSerial or S.bootstrapRevision~=(S.viewEventRevision or 0)then return end
- if selected(value)~=nil then S.selectedView=value;S.viewSource='verified selected-view bootstrap' end
-end)
 local function currentView(target,targetName)
- ensureViewHook()
- if S.viewOwner~=target or S.viewOwnerName~=targetName then
-  S.viewOwner=target;S.viewOwnerName=targetName;S.viewComponent=nil;S.viewResolveAt=0;S.selectedView=nil;S.viewSource=nil
-  S.viewEventRevision=(S.viewEventRevision or 0)+1
- end
- local view=S.viewComponent
- if view and not R.isLiveObject(view)then S.viewComponent=nil;view=nil;S.selectedView=nil;S.viewResolveAt=0 end
- if not view and R.tick>=(S.viewResolveAt or 0)then
-  S.viewResolveAt=R.tick+60
-  if not R.isLiveObject(S.cameraViewClass)then
-   local ok,cls=pcall(function()return uevr.api:find_uobject('Class /Script/Live.LiveCameraViewComponent')end)
-   S.cameraViewClass=ok and cls or nil
-  end
-  local found=R.isLiveObject(S.cameraViewClass)and call(target,'GetComponentByClass',S.cameraViewClass)or nil
-  local n=call(found,'get_full_name')or''
-  if n:match('^LiveCameraViewComponent ')and call(found,'GetOwner')==target then
-   S.viewComponent=found;view=found;S.viewComponentName=n
-   S.bootstrapSerial=(S.bootstrapSerial or 0)+1;S.bootstrapRevision=S.viewEventRevision or 0
-   pcall(function()uevr.api:dispatch_custom_event('AC8_PlaneViewBootstrap',tostring(S.bootstrapSerial)..'|'..n)end)
-  end
- end
- -- If the hook is unavailable, periodically re-bootstrap instead of using
- -- component flags. Normal supported operation performs no selected-view polling.
- if view and not S.viewHook and R.tick>=(S.bootstrapRetryAt or 0)then
-  S.bootstrapRetryAt=R.tick+60;S.bootstrapSerial=(S.bootstrapSerial or 0)+1;S.bootstrapRevision=S.viewEventRevision or 0
-  pcall(function()uevr.api:dispatch_custom_event('AC8_PlaneViewBootstrap',tostring(S.bootstrapSerial)..'|'..S.viewComponentName)end)
- end
- local value=S.selectedView
- return value==2,{selectedView=value,selectedViewName=({[0]='first-person',[1]='cockpit',[2]='third-person'})[value]or'unknown/special',
-  viewComponent=S.viewComponentName,confirmedThirdPerson=value==2,firstPersonAllowed=value==0 or value==1,
-  detection=S.viewSource or'waiting for selected view',eventHookInstalled=S.viewHook~=nil}
+ return R.getPlaneView(target,targetName)
+end
+-- The selected-view bootstrap can be unavailable on initial entry. Capture
+-- live settings only when one owned, active first-person camera is actually
+-- supplying the manager's current pose; never infer the enum from IsActive.
+local function renderedFirstPerson(target,viewInfo)
+ if not R.context.flight or R.matchState()~='InProgress'or R.paused()~=false then return end
+ if viewInfo and viewInfo.selectedView~=nil and not viewInfo.firstPersonAllowed then return end
+ local view=call(target,'get_property','CameraViewComponent')
+ if not(call(view,'get_full_name')or''):match('^LiveCameraViewComponent ')or call(view,'GetOwner')~=target then return end
+ local first=call(view,'get_property','CachedFirstPersonCamera')
+ local cockpit=call(view,'get_property','CachedCockpitCamera')
+ local third=call(view,'get_property','CachedThirdPersonCamera')
+ local firstActive,cockpitActive=call(first,'IsActive'),call(cockpit,'IsActive')
+ if call(third,'IsActive')~=false or firstActive==cockpitActive or
+  (firstActive~=true and firstActive~=false)or(cockpitActive~=true and cockpitActive~=false)then return end
+ local selectedView=firstActive and 0 or 1
+ if viewInfo and viewInfo.selectedView~=nil and viewInfo.selectedView~=selectedView then return end
+ local component=firstActive and first or cockpit
+ local expected=firstActive and'^LiveFirstPersonCameraComponent 'or'^LiveCockpitCameraComponent '
+ if not(call(component,'get_full_name')or''):match(expected)or call(component,'GetOwner')~=target then return end
+ local manager=call(R.context.pc,'get_property','PlayerCameraManager')
+ local p=call(manager,'GetCameraLocation');local c=call(component,'K2_GetComponentLocation')
+ if not p or not c then return end
+ local ok,distance=pcall(function()
+  local x,y,z=p.X-c.X,p.Y-c.Y,p.Z-c.Z
+  return x*x+y*y+z*z
+ end)
+ if not ok or type(distance)~='number'or distance~=distance or distance>.1^2 then return end
+ return selectedView
 end
 
 -- Per-aircraft perceived-size adjustment through UEVR's existing world scale.
@@ -725,7 +695,13 @@ local function update()
  readConfig()
  local status={mode='uevr_absolute',state='waiting',configError=S.configError};S.status=status
  local ci=rawget(_G,'AC8_CinematicIntent')
- if presentationOwns(ci)then sizeRestore();S.selection=nil;status.state='cinematic/hangar owns camera';return end
+ local hud=R.context.hudName or''
+ if hud:match('^BP_LiveMenuHUD_C ')or hud:match('^BP_LiveHangarHUD_C ')then
+  S.resume=nil;S.resumePending=nil;S.resumeOverride=nil
+ end
+ if presentationOwns(ci)then
+  S.resumePending=S.resume~=nil;sizeRestore();S.selection=nil;status.state='cinematic/hangar owns camera';return
+ end
  local target=call(R.context.pc,'GetViewTarget')
  if not target then target=call(call(R.context.pc,'get_property','PlayerCameraManager'),'GetViewTarget')end
  local name=call(target,'get_full_name')or''
@@ -734,6 +710,13 @@ local function update()
  if R.context.flight and class and R.matchState()~='WaitingToStart'then third,viewInfo=currentView(target,name)end
  if not sizeState.recoveryFailed then updateCockpitSize(class,viewInfo)end
  local admitted=viewInfo and viewInfo.firstPersonAllowed==true
+ local renderedView=renderedFirstPerson(target,viewInfo)
+ if third or(class and S.resume and S.resume.class~=class)then
+  S.resume=nil;S.resumePending=nil;S.resumeOverride=nil
+ elseif S.resume and(S.resume.name~=name or not R.context.flight or not class or R.matchState()~='InProgress'or
+  (viewInfo and viewInfo.selectedView~=nil and not admitted))then
+  S.resumePending=true
+ end
  status.aircraftClass=class;status.viewTarget=name;status.viewDetection=viewInfo
  status.selectionReason=admitted and'confirmed first-person/cockpit view'or third and'third-person reset'or'outside confirmed first-person view'
  local desired={forward=0,right=0,up=0};local selection='outside-first-person'
@@ -744,18 +727,37 @@ local function update()
  end
  if not S.config.enabled and not S.owned then status.state='disabled';return end
  local key=selection..':'..S.revision..':'..(admitted and name or '')..':'..tostring(viewInfo and viewInfo.selectedView)
- if S.selection~=key then
+ if S.resumeOverride and S.resumeOverride.key~=key then S.resumeOverride=nil end
+ local resume=S.resumePending and S.resume
+ local restoring=admitted and renderedView~=nil and resume and resume.class==class and
+  resume.view==renderedView and resume.revision==S.revision and resume.perPlaneEnabled==(R.perPlaneSettingsEnabled~=false)
+ if restoring then desired=resume.value
+ elseif S.resumeOverride then desired=S.resumeOverride.value end
+ if S.selection~=key or restoring then
   if R.tick<(S.retryAt or 0)then status.state='waiting to retry UEVR write';return end
   local ok,err=apply(desired)
   if not ok then S.retryAt=R.tick+60;status.state='write failed';status.error=err;return end
   S.retryAt=nil;S.selection=key;S.owned=S.config.enabled;status.appliedThisTick=true
  end
+ if restoring then
+  S.resumeOverride={key=key,value={forward=desired.forward,right=desired.right,up=desired.up}}
+  S.resumePending=nil
+ elseif admitted and renderedView~=nil then
+  S.resumePending=nil
+ end
  status.state=not admitted and'outside first-person; zero UEVR offset'or S.config.enabled and(selection=='default'and'default UEVR position'or'aircraft UEVR position')or'disabled; default restored'
+ if admitted and S.resumeOverride then status.state='pre-takeover live UEVR position restored'end
  S.thirdPerson=third;S.firstPersonAllowed=admitted
  status.forward=desired.forward;status.right=desired.right;status.up=desired.up
+ if renderedView~=nil and S.config.enabled then
+  local value=observed()
+  if value then
+   S.resume={class=class,name=name,view=renderedView,revision=S.revision,value=value,perPlaneEnabled=R.perPlaneSettingsEnabled~=false}
+  else status.error='Live camera offsets unavailable; pre-takeover position could not be captured'end
+ end
  
  -- Manual menu tuning is allowed until the next
- -- aircraft change, configuration edit or return from cinematic/hangar control.
+ -- aircraft/view change or configuration edit. Camera takeovers retain live tuning.
 end
 host.sdk.callbacks.on_post_engine_tick(update)
 host.sdk.callbacks.on_script_reset(function()
